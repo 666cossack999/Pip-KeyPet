@@ -190,7 +190,8 @@ static struct {
     float micro_x, micro_y, next_micro;
     bool touching, petting;
     float fx, fy, path, frame_ms;
-    uint32_t last_tick, press_tick;
+    uint32_t last_tick, press_tick, last_draw;
+    bool eco;
 } s = {.bat_pct = -1, .intro = -1, .last_bang = -10}; /* the battery is unknown until the power chip says */
 
 static float frand(float a, float b) { return a + (b - a) * (float)lv_rand(0, 10000) / 10000.0f; }
@@ -226,6 +227,11 @@ static int mood_voice(int mood)
 }
 
 #define FEAT(f) (!(s.feat_off >> (f) & 1))
+#define HEARS(f) (FEAT(f) && !s.eco) /* listening for breath or bangs keeps the mic on: off when saving energy */
+#define ECO_FRAME_MS 50 /* energy saving: at most 20 frames a second (the face is most of the battery after the panel) */
+void pip_eco(bool on) { s.eco = on; }
+bool pip_eco_on(void) { return s.eco; }
+bool pip_mic_wanted(void) { return HEARS(PIP_F_BLOW) || HEARS(PIP_F_NOISE); }
 void pip_feature(int f, bool on) { s.feat_off = on ? s.feat_off & ~(1u << f) : s.feat_off | 1u << f; }
 bool pip_feature_on(int f) { return FEAT(f); }
 void *pip_pet(void) { return &s.pet; }
@@ -549,7 +555,8 @@ static void step(float dt, const mood_def_t *m, bool dizzy)
     spring(&s.wag, m->wag, 20, 1.0f, dt);
 
     /* the eyes jump to the target, the head follows slowly and the eyes counter-rotate */
-    float tx = s.tgx + m->gx + s.imu.tilt_x * 1.1f, ty = s.tgy + m->gy + s.imu.tilt_y * 0.9f; /* eyes roll downhill */
+    float lean = s.eco ? 0 : 1; /* saving energy the eyes hold still instead of rolling with every tilt */
+    float tx = s.tgx + m->gx + s.imu.tilt_x * 1.1f * lean, ty = s.tgy + m->gy + s.imu.tilt_y * 0.9f * lean; /* eyes roll downhill */
     tx = fmaxf(-1.2f, fminf(1.2f, tx));
     ty = fmaxf(-1.0f, fminf(1.0f, ty));
     float eye_k = 900 * (1 - 0.85f * slow), head_k = 45 * (1 - 0.7f * slow);
@@ -595,8 +602,9 @@ static void update(float dt)
     hush = voice_busy() ? 0 : hush + dt;
     bool ears = hush > 0.4f;
     if (!ears) s.bang_wait = 0;
-    if (ears && mic_blowing() && FEAT(PIP_F_BLOW) && !s.pet.asleep) react(PIP_OUCH, 0.6f, "blown"); /* someone blows on him: he screws his eyes up */
-    if (mic_on() && FEAT(PIP_F_NOISE)) { /* a bang: far over the room's level, all at once */
+    if (ears && mic_blowing() && HEARS(PIP_F_BLOW) && !s.pet.asleep) react(PIP_OUCH, 0.6f, "blown"); /* someone blows on him: he screws his eyes up */
+    if (!mic_on()) s.mic_t = 0; /* switched off and on again: the room's level is learnt anew */
+    if (mic_on() && HEARS(PIP_F_NOISE)) { /* a bang: far over the room's level, all at once */
         float db = mic_db();
         if ((s.mic_t += dt) < 2) s.room_db = db; /* the meter settles first */
         if (s.bang_wait > 0) { /* held back a moment: a breath on the mic starts the same way */
@@ -756,15 +764,17 @@ static void update(float dt)
                                                  (uint8_t)(fminf(fmaxf(s.tint[1].x, 0), 1) * 255),
                                                  (uint8_t)(fminf(fmaxf(s.tint[2].x, 0), 1) * 255)));
     s.face.blush = fmaxf(s.blush.x, 0);
-    effects(m->fx, dt);
+    /* the screen is dark: no rain, no bobbing "?" - they would keep LVGL drawing for nobody */
+    effects(s.dark ? FX_NONE : m->fx, dt);
+    const char *text = s.dark ? NULL : m->text;
 
     /* text above the eyes: swearing shakes, a question mark bobs */
-    if (m->text != s.text_shown) {
-        s.text_shown = m->text;
-        lv_label_set_text(s.text, m->text ? m->text : "");
+    if (text != s.text_shown) {
+        s.text_shown = text;
+        lv_label_set_text(s.text, text ? text : "");
         lv_obj_set_style_text_color(s.text, lv_color_hex(m->text_color), 0);
     }
-    if (m->text) {
+    if (text) {
         float bob = mood == PIP_SWEARING ? 0 : sinf(s.t * 3) * 6;
         lv_obj_align(s.text, LV_ALIGN_TOP_MID, (int)(jx * 2), 48 + (int)(bob + jy * 2));
     }
@@ -964,12 +974,16 @@ static void tick_cb(lv_timer_t *t)
             frame_took((float)lv_tick_elaps(s.last_swap));
             s.last_swap = lv_tick_get();
         }
+        if (s.eco && lv_tick_elaps(s.last_draw) < ECO_FRAME_MS) return; /* the cores rest until the next frame is due */
+        s.last_draw = lv_tick_get();
         s.rface = s.face; /* this moment's eyes, drawn over what the back canvas held two frames ago */
         memcpy(s.rface.drawn, s.back_rects, sizeof s.rface.drawn);
         s.pending = true;
         face_start(&s.rface, (uint16_t *)s.back->data, SCR, SCR);
         return;
     }
+    if (s.eco && lv_tick_elaps(s.last_draw) < ECO_FRAME_MS) return;
+    s.last_draw = lv_tick_get();
     face_rect_t was[4];
     memcpy(was, s.face.drawn, sizeof was);
     face_draw(&s.face, (uint16_t *)s.buf->data, SCR, SCR);

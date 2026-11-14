@@ -47,5 +47,6 @@ void mic_feed(const int16_t *s, int n, int rate)
 }
 
 bool mic_on(void) { return m.on; }
+void mic_stop(void) { m.on = m.blowing = false, m.blow_t = 0, m.power = 0, m.db = 0; }
 float mic_db(void) { return m.db; }
 bool mic_blowing(void) { return m.blowing; }

@@ -7,6 +7,9 @@ void ui_unlock(void);
 extern int tz_min;    /* local time zone, minutes east of UTC; the iPhone sets it */
 
 void ble_start(void); /* the iPhone link: ANCS notifications and calls, AMS music, CTS time */
+void ble_quiet(bool quiet); /* every link down and no advertising (saving energy while asleep); false: back on air */
+void batlog_dump(void (*out)(const char *)); /* the battery log as "@B seq uptime_s mV % flags lit%" rows, then "@B end" */
+void batlog_clear(void);
 
 void debug_start(void);
 void settings_save(void);       /* power, features, brightness, privacy into NVS */

@@ -41,6 +41,9 @@ void pip_power(int seconds);             /* fall asleep (screen off, no drawing)
 int pip_power_after(void);
 void pip_hold_awake(bool on);              /* an app that is there to be looked at keeps him awake */
 int pip_display_level(void);               /* the panel: 0 off, 25 dimmed (about to sleep), 100 */
+void pip_eco(bool on);                     /* energy saving: fewer frames, the eyes ignore the tilt, no listening for breath or bangs */
+bool pip_eco_on(void);
+bool pip_mic_wanted(void);                 /* Pip listens: the host may switch the microphone off when he does not */
 void pip_wake(void);                       /* something to look at: wake up */
 void pip_wake_up(void);                   /* power-on: eyes open out of black, sleepy, a shake, playful */
 void pip_shake_ok(bool ok);                /* false while an app wants the shakes for itself */

@@ -50,7 +50,13 @@ brightness, theme, features, notification privacy) and flashing with esptool-js 
 pet, settings, bonds - survives). Works as a plain file (`Pip-Windows.bat` / `Pip-Mac.command` / `Pip-Linux.sh` open it
 in Chrome/Edge) and from GitHub Pages. `docs/debug.html` is the developer page (USB/Bluetooth buttons, or served by
 `tools/pipdebug.py`). Board commands for settings: `name first|last|org`, `link i service|handle|url`, `power s`,
-`bright %`, `theme i`, `privacy i`, `feat i 0|1`, `config` (answers `@C {json}`); all persisted by main.c in NVS.
+`bright %`, `theme i`, `privacy i`, `feat i 0|1`, `eco 0|1`, `config` (answers `@C {json}`); all persisted by main.c in NVS.
+Dark screen = sleeping chip (always, not only eco): main.c releases its PM locks, the chip drops to 80 MHz and
+light-sleeps between wakeups (LVGL every 50 ms, the speaker's I2S closed); Bluetooth uses modem sleep on the main XTAL.
+Light sleep isolates pins unless listed in `pm_keep_pins()`; with a USB host on the debug port it never light-sleeps.
+`pm` dumps who holds the chip awake. Energy saving (`pip_eco`): ≤20 fps, no tilt in the gaze, no breath/bang listening (main.c closes the mic when `pip_mic_wanted()`
+is false), BLE off the air while the screen sleeps (`ble_quiet`). `bat [clear]` dumps the battery log (`@B`, a row a minute
+in the `storage` partition at 64 KB) — the panel's dev tab saves it as CSV, for measuring what a charge lasts.
 
 ## Architecture worth knowing before editing
 

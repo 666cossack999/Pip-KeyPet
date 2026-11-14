@@ -46,3 +46,17 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048
 # battery, debug, service changed); 8 in all ran out (ble_store_config_write_cccd rc=27)
 CONFIG_BT_NIMBLE_MAX_BONDS=6
 CONFIG_BT_NIMBLE_MAX_CCCDS=40
+# the host task runs the iPhone's callbacks into the UI (ui_lock + LVGL): 4 KB overflowed on a full reconnect (ANCS+AMS+CTS)
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
+
+# a dark screen is a sleeping chip: 80 MHz + automatic light sleep between wakeups (main.c holds them off while lit)
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+# Bluetooth lets the chip sleep between its radio events (no 32 kHz crystal: the main one stays up)
+CONFIG_BT_CTRL_MODEM_SLEEP=y
+CONFIG_BT_CTRL_MODEM_SLEEP_MODE_1=y
+CONFIG_BT_CTRL_LPCLK_SEL_MAIN_XTAL=y
+CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP=y
+# keep the CPU powered in light sleep: its retention buffer costs internal RAM
+# CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP is not set

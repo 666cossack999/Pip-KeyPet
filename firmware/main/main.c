@@ -8,8 +8,10 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
+#include "esp_partition.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "esp_pm.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -103,6 +105,7 @@ void settings_save(void)
     nvs_set_i16(h, "power", (int16_t)pip_power_after());
     nvs_set_u8(h, "feat", feat);
     nvs_set_u8(h, "bright", (uint8_t)bright);
+    nvs_set_u8(h, "eco", pip_eco_on());
     nvs_set_i8(h, "privacy", (int8_t)phone_privacy());
     nvs_commit(h);
     nvs_close(h);
@@ -121,12 +124,13 @@ static void settings_load(void)
     nvs_handle_t h;
     if (nvs_open("keypet", NVS_READONLY, &h) == ESP_OK) {
         int16_t power;
-        uint8_t feat, b;
+        uint8_t feat, b, eco;
         size_t n = sizeof profile;
         if (nvs_get_i16(h, "power", &power) == ESP_OK) pip_power(power);
         if (nvs_get_u8(h, "feat", &feat) == ESP_OK)
             for (int f = 0; f < PIP_F_COUNT && f < 8; f++) pip_feature(f, feat >> f & 1);
         if (nvs_get_u8(h, "bright", &b) == ESP_OK) bright = b < 10 ? 10 : b > 100 ? 100 : b;
+        if (nvs_get_u8(h, "eco", &eco) == ESP_OK) pip_eco(eco);
         if (nvs_get_blob(h, "profile", &profile, &n) != ESP_OK || n != sizeof profile) n = 0; /* a size of its own: the defaults stay */
         nvs_close(h);
     }
@@ -225,6 +229,7 @@ static bool qmi_read(float a[3], float g[3]) /* accel in g, gyro in deg/s, both 
 #define AXP_IRQ_EN2 0x41      /* bit 3: PWR key short press */
 #define AXP_IRQ_STATUS2 0x49  /* same bit, write 1 to clear */
 #define AXP_BAT_PERCENT 0xA4
+#define AXP_VBAT_H 0x34       /* battery voltage, mV: 6 bits here, 8 in the next register */
 static i2c_master_dev_handle_t pmu;
 
 static int pmu_get(uint8_t reg)
@@ -252,12 +257,71 @@ static bool pmu_init(i2c_master_bus_handle_t bus)
     return true;
 }
 
+static struct { int mv, pct; bool charging, usb; } bat = {.pct = -1};
+
 static void pmu_battery(void)
 {
     int s1 = pmu_get(AXP_STATUS1), s2 = pmu_get(AXP_STATUS2), pct = pmu_get(AXP_BAT_PERCENT);
+    int vh = pmu_get(AXP_VBAT_H), vl = pmu_get(AXP_VBAT_H + 1);
     if (s1 < 0) return;
     bool present = s1 & 0x08, charging = s2 >= 0 && ((s2 >> 5) & 0x03) == 0x01;
-    shell_battery(present && pct >= 0 && pct <= 100 ? pct : -1, charging);
+    bat.pct = present && pct >= 0 && pct <= 100 ? pct : -1, bat.charging = charging, bat.usb = s1 & 0x20;
+    bat.mv = present && vh >= 0 && vl >= 0 ? (vh & 0x3F) << 8 | vl : 0;
+    shell_battery(bat.pct, charging);
+}
+
+/* ---------- the battery log: a row a minute in flash, to measure what a charge lasts ----------
+   Charge him full, unplug, let him run down, plug in and read it with "bat" (the panel saves it as CSV). A ring of
+   16-byte rows behind the mood history in the "storage" partition: ~17 h, kept across restarts; the uptime starts
+   again at 0 on every boot, so each run is easy to tell apart. */
+#define BATLOG_AT (64 * 1024) /* the mood history (debug.c) has the first 24 KB */
+#define BATLOG_SECTORS 4
+#define BATLOG_SLOTS (BATLOG_SECTORS * 4096 / 16)
+typedef struct { uint32_t seq, up_s; uint16_t mv; uint8_t pct, flags, lit, tag[3]; } batrow_t; /* flags: 1 charging, 2 USB, 4 eco */
+_Static_assert(sizeof(batrow_t) == 16, "a flash slot");
+#define BATROW_OK(r) ((r).tag[0] == 'P' && (r).tag[1] == 'b' && (r).tag[2] == '1')
+static const esp_partition_t *batlog;
+static int batlog_next;
+static uint32_t batlog_seq;
+
+static void batlog_load(void)
+{
+    batlog = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
+    if (!batlog) return;
+    batrow_t r;
+    for (int i = 0; i < BATLOG_SLOTS; i++)
+        if (esp_partition_read(batlog, BATLOG_AT + i * 16, &r, 16) == ESP_OK && BATROW_OK(r) && r.seq >= batlog_seq)
+            batlog_seq = r.seq + 1, batlog_next = (i + 1) % BATLOG_SLOTS;
+}
+
+static void batlog_put(int lit_pct)
+{
+    if (!batlog || bat.pct < 0) return;
+    batrow_t r = {batlog_seq++, (uint32_t)(esp_timer_get_time() / 1000000), (uint16_t)bat.mv, (uint8_t)bat.pct,
+                  (uint8_t)(bat.charging | bat.usb << 1 | pip_eco_on() << 2), (uint8_t)lit_pct, {'P', 'b', '1'}};
+    if (batlog_next % 256 == 0) esp_partition_erase_range(batlog, BATLOG_AT + batlog_next * 16, 4096);
+    esp_partition_write(batlog, BATLOG_AT + batlog_next * 16, &r, 16);
+    batlog_next = (batlog_next + 1) % BATLOG_SLOTS;
+}
+
+void batlog_dump(void (*out)(const char *))
+{
+    char b[64];
+    batrow_t r;
+    for (int k = 0; batlog && k < BATLOG_SLOTS; k++) { /* oldest first: from the slot after the newest, round the ring */
+        int i = (batlog_next + k) % BATLOG_SLOTS;
+        if (esp_partition_read(batlog, BATLOG_AT + i * 16, &r, 16) != ESP_OK || !BATROW_OK(r)) continue;
+        snprintf(b, sizeof b, "@B %lu %lu %u %u %u %u\n", (unsigned long)r.seq, (unsigned long)r.up_s, r.mv, r.pct, r.flags, r.lit);
+        out(b);
+        if (k % 32 == 31) vTaskDelay(1); /* let the USB drain */
+    }
+    out("@B end\n");
+}
+
+void batlog_clear(void)
+{
+    if (batlog) esp_partition_erase_range(batlog, BATLOG_AT, BATLOG_SECTORS * 4096);
+    batlog_next = 0;
 }
 
 static bool pmu_pwr_pressed(void)
@@ -269,12 +333,44 @@ static bool pmu_pwr_pressed(void)
 }
 
 /* 50 Hz: accelerometer and the BOOT key into the UI, plus a status line every 5 s */
+/* While the screen is lit the chip runs flat out (the face needs both cores at 240 MHz); dark, these locks go and
+   it drops to 80 MHz and light-sleeps between wakeups, unless something else holds it (Bluetooth between its radio
+   events, an open I2S, the USB host on the debug port). */
+static esp_pm_lock_handle_t lit_cpu, lit_awake;
+static void pm_start(void)
+{
+    esp_pm_config_t pm = {.max_freq_mhz = 240, .min_freq_mhz = 80, .light_sleep_enable = true};
+    esp_err_t e = esp_pm_configure(&pm);
+    if (e != ESP_OK) ESP_LOGW(TAG, "power management off: %s", esp_err_to_name(e));
+    esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "lit", &lit_cpu);
+    esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "lit", &lit_awake);
+    esp_pm_lock_acquire(lit_cpu), esp_pm_lock_acquire(lit_awake);
+}
+
+/* light sleep isolates every pin (an S3 workaround, not optional); these must hold through it: the panel's and the
+   touch's resets (floating, they reset the chips), the panel's select, the amplifier, the I2C pull-ups, the bottom key */
+static void pm_keep_pins(void)
+{
+    const gpio_num_t keep[] = {BSP_LCD_RST, BSP_LCD_TOUCH_RST, BSP_LCD_CS, BSP_POWER_AMP_IO, BSP_I2C_SCL, BSP_I2C_SDA, BOOT_GPIO};
+    for (int k = 0; k < sizeof keep / sizeof keep[0]; k++) gpio_sleep_sel_dis(keep[k]);
+}
+
+static void pm_lit(bool lit)
+{
+    if (lit) esp_pm_lock_acquire(lit_cpu), esp_pm_lock_acquire(lit_awake);
+    else esp_pm_lock_release(lit_awake), esp_pm_lock_release(lit_cpu);
+    ESP_LOGI(TAG, "chip %s", lit ? "awake" : "sleeping between wakeups");
+}
+
 static void sensors_task(void *arg)
 {
     bool imu = qmi_init(bsp_i2c_get_handle());
     bool power = pmu_init(bsp_i2c_get_handle());
     if (!power) ESP_LOGW(TAG, "AXP2101 not answering: no battery level, no PWR key");
-    int64_t last_bat = 0;
+    int64_t last_bat = 0, last_batlog = esp_timer_get_time();
+    int lit = 0, ticks = 0;
+    bool ble_off = false, lit_held = true;
+    batlog_load();
     gpio_config_t io = {.pin_bit_mask = 1ULL << BOOT_GPIO, .mode = GPIO_MODE_INPUT, .pull_up_en = GPIO_PULLUP_ENABLE};
     gpio_config(&io);
     int64_t last = esp_timer_get_time(), last_log = last, last_save = last;
@@ -310,8 +406,13 @@ static void sensors_task(void *arg)
         pip_info_t in;
         pip_get_info(&in);
         panel_want = pip_display_level();
+        bool quiet = pip_eco_on() && !panel_want; /* saving energy: Bluetooth sleeps with the screen */
         ui_unlock();
         boot_prev = boot;
+        if (quiet != ble_off) ble_off = quiet, ble_quiet(quiet);
+        if (lit_held != (panel_want > 0)) lit_held = panel_want > 0, pm_lit(lit_held);
+        lit += panel_want > 0, ticks++;
+        if (now - last_batlog > 60000000) last_batlog = now, batlog_put(lit * 100 / ticks), lit = ticks = 0;
 
         if (now - last_log > 5000000) {
             last_log = now;
@@ -322,7 +423,8 @@ static void sensors_task(void *arg)
             ESP_LOGI(TAG, "mood=%s reaction=%s steps=%d face=%.1f ms refresh=%.1f ms accel=(%.2f %.2f %.2f) free psram=%u internal=%u",
                      in.mood, in.reaction, in.steps, in.frame_ms, refr_ms, have_a ? a[0] : 0, have_a ? a[1] : 0,
                      have_a ? a[2] : 0, (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-            ESP_LOGI(TAG, "face draw %.1f ms on two cores (bands %.1f / %.1f ms), battery %s", face_ms[0], face_ms[1], face_ms[2], shell_battery_text());
+            ESP_LOGI(TAG, "face draw %.1f ms on two cores (bands %.1f / %.1f ms), battery %s %d mV%s%s", face_ms[0], face_ms[1], face_ms[2],
+                     shell_battery_text(), bat.mv, bat.usb ? ", USB" : "", pip_eco_on() ? ", eco" : "");
             ESP_LOGI(TAG, "screen %s: %d frames/s to the panel, render %.1f ms", shell_where(), frames_sent / 5, render_ms);
             frames_sent = 0;
             ESP_LOGI(TAG, "panel: TE wait %.1f ms (in parallel), stream %.0f rows/ms (%.1f MB/s)", te_wait_ms, stream_rows_per_ms, stream_mb_s);
@@ -358,7 +460,19 @@ static void mic_task(void *arg)
     }
     esp_codec_dev_set_in_gain(mic, MIC_GAIN_DB);
     static int16_t buf[AUDIO_RATE / 50];
-    for (;;) {
+    bool open = true;
+    for (int k = 0;; k++) {
+        if (k % 25 == 0) { /* twice a second: does anyone listen? (Pip's breath and bangs, the noise meter) */
+            ui_lock();
+            bool want = pip_mic_wanted() || !strcmp(shell_where(), "noise");
+            ui_unlock();
+            if (want != open) {
+                if (want) open = esp_codec_dev_open(mic, &fs) == ESP_CODEC_DEV_OK, esp_codec_dev_set_in_gain(mic, MIC_GAIN_DB);
+                else esp_codec_dev_close(mic), mic_stop(), open = false;
+                ESP_LOGI(TAG, "microphone %s", open ? "on" : "off");
+            }
+        }
+        if (!open) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
         if (esp_codec_dev_read(mic, buf, sizeof buf) == ESP_CODEC_DEV_OK) mic_feed(buf, AUDIO_RATE / 50, AUDIO_RATE);
         else vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -376,8 +490,15 @@ static void audio_task(void *arg)
     esp_codec_dev_set_out_vol(spk, 70);
     xTaskCreate(mic_task, "mic", 3072, NULL, 4, NULL); /* after the speaker: it set up the I2S both share */
     static int16_t buf[256];
+    bool open = true;
     for (;;) {
-        if (!voice_busy()) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
+        if (!voice_busy()) {
+            /* an open I2S keeps the chip awake: shut it while dark and silent (and the mic, sharing it, is shut) */
+            if (open && !panel_want && !mic_on()) esp_codec_dev_close(spk), open = false;
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+        if (!open) open = true, esp_codec_dev_open(spk, &fs), esp_codec_dev_set_out_vol(spk, 70);
         voice_render(buf, 256);
         esp_codec_dev_write(spk, buf, sizeof buf);
     }
@@ -539,7 +660,10 @@ static void lvgl_task(void *arg)
         ui_lock();
         uint32_t wait = lv_timer_handler();
         ui_unlock();
-        vTaskDelay(pdMS_TO_TICKS(wait < 1 ? 1 : wait > 10 ? 10 : wait));
+        /* Pip's tick asks every 4 ms; dark, nothing is drawn, so 20 times a second lets the chip sleep between */
+        uint32_t cap = panel_lit ? 10 : 50;
+        if (!panel_lit) wait = cap;
+        vTaskDelay(pdMS_TO_TICKS(wait < 1 ? 1 : wait > cap ? cap : wait));
     }
 }
 
@@ -675,6 +799,7 @@ static void refr_cb(lv_event_t *e)
 
 void app_main(void)
 {
+    pm_start();
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -689,6 +814,7 @@ void app_main(void)
     face_start = face_start_bg;
     lv_display_t *disp = display_start();
     brightness(bright);
+    pm_keep_pins(); /* after the drivers set them up */
     i2c_scan(bsp_i2c_get_handle());
 
     ui_lock();

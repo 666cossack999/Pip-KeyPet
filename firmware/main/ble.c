@@ -917,8 +917,23 @@ static void bt_act(int what)
     ESP_LOGI(TAG, "forgot every bonded device");
 }
 
+static bool up, quiet; /* the host started; asleep in energy saving: off the air */
+
+void ble_quiet(bool q)
+{
+    if (!up) return;
+    quiet = q;
+    if (!q) { advertise(); ESP_LOGI(TAG, "awake: advertising again"); return; }
+    ble_gap_adv_stop();
+    const uint16_t cs[] = {b.conn, host_conn, dbg_conn, pending, pending2}; /* the iPhone reconnects by itself when we are back */
+    for (unsigned i = 0; i < sizeof cs / sizeof cs[0]; i++)
+        if (cs[i] != BLE_HS_CONN_HANDLE_NONE) ble_gap_terminate(cs[i], BLE_ERR_REM_USER_CONN_TERM);
+    ESP_LOGI(TAG, "asleep: Bluetooth off the air");
+}
+
 static void advertise(void)
 {
+    if (quiet) return; /* a link that just went down would call us back on air */
     static const uint8_t adv[] = {2, 0x01, 0x06,          /* flags: general discoverable, LE only */
                                   3, 0x03, 0x12, 0x18,    /* services: HID */
                                   3, 0x19, 0xC1, 0x03,    /* appearance: keyboard */
@@ -999,4 +1014,5 @@ void ble_start(void)
     phone_on_host(host_cmd);
     hosts_load(); /* the computers we know */
     nimble_port_freertos_init(host_task);
+    up = true;
 }

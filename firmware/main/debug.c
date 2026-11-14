@@ -7,9 +7,10 @@
      @T {json}          the urges [need, line, mood, other face]
    why = [kind, which, value]: the branch of the tree that picked the mood (ui/pet.h pet_mood_why).
    Commands in: mood <i> | auto | react <i> <s> | need <0-4> <v> | day <v> | annoy <v> | urge <i> <line>
-                pool <great> <good> <meh> | set <knob> <v> | feat <f> <0|1> | demo <s> [i ...] | hist | names | tune
+                pool <great> <good> <meh> | set <knob> <v> | feat <f> <0|1> | eco <0|1> | bat [clear] | demo <s> [i ...] | hist | names | tune
                 open <app> | home | btn <0|1> | meet | feed | play | sleep | wake | rare [mood] | game <0 won|1 lost|2 record> */
 #include "board.h"
+#include "esp_pm.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -193,8 +194,9 @@ static void json_str(char *b, size_t n, const char *s) /* a JSON string, quoted,
 static void config(void) /* @C: everything the settings page shows */
 {
     static char b[1600], t[260];
-    int n = snprintf(b, sizeof b, "@C {\"ver\":\"%s\",\"power\":%d,\"bright\":%d,\"theme\":%d,\"privacy\":%d,\"feat\":[",
-                     esp_app_get_description()->version, pip_power_after(), settings_brightness(), theme_index(), phone_privacy());
+    int n = snprintf(b, sizeof b, "@C {\"ver\":\"%s\",\"power\":%d,\"bright\":%d,\"eco\":%d,\"theme\":%d,\"privacy\":%d,\"feat\":[",
+                     esp_app_get_description()->version, pip_power_after(), settings_brightness(), pip_eco_on(), theme_index(),
+                     phone_privacy());
     for (int f = 0; f < PIP_F_COUNT; f++) n += snprintf(b + n, sizeof b - n, "%s%d", f ? "," : "", pip_feature_on(f));
     const char *names[3] = {profile.first, profile.last, profile.org}, *keys[3] = {"first", "last", "org"};
     n += snprintf(b + n, sizeof b - n, "]");
@@ -252,6 +254,8 @@ static void command(char *line)
     if (!strcmp(c, "names")) { names(); return; }
     if (!strcmp(c, "tune")) { tune(); return; }
     if (!strcmp(c, "config")) { config(); return; }
+    if (!strcmp(c, "pm")) { esp_pm_dump_locks(stdout); return; } /* who keeps the chip awake */
+    if (!strcmp(c, "bat")) { if (n > 1 && !strcmp(arg[1], "clear")) batlog_clear(); batlog_dump(put); return; }
     ui_lock();
     if (!strcmp(c, "mood") && n > 1) pip_set_mood((int)a1);
     else if (!strcmp(c, "auto")) pip_auto(true), demo_s = 0;
@@ -268,6 +272,7 @@ static void command(char *line)
     else if (!strcmp(c, "game") && n > 1 && a1 >= 0 && a1 <= 2) pip_game((int)a1);
     else if (!strcmp(c, "feat") && n > 2) pip_feature((int)a1, a2 != 0), settings_save();
     else if (!strcmp(c, "power") && n > 1) pip_power((int)a1), settings_save();      /* seconds to sleep, 0 never */
+    else if (!strcmp(c, "eco") && n > 1) pip_eco(a1 != 0), settings_save();              /* energy saving */
     else if (!strcmp(c, "bright") && n > 1) settings_bright((int)a1), settings_save(); /* % */
     else if (!strcmp(c, "privacy") && n > 1) phone_set_privacy((int)a1), settings_save();
     else if (!strcmp(c, "theme") && n > 1) shell_set_theme((int)a1);                   /* kept by main.c theme_keep */
