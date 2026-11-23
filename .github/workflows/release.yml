@@ -87,6 +87,9 @@ jobs:
       - name: Run complete simulation smoke suite
         run: /usr/bin/python3 sim/check.py
 
+      - name: Test BLE OTA browser protocol
+        run: node tools/test-ble-ota.mjs
+
 
   pages:
     name: Publish web flasher
