@@ -465,7 +465,7 @@ function usbFailure(message) {
   state(message, false);
 }
 function scheduleUsbRecovery(delay = 1000) {
-  if (!usbWanted || port || usbConnecting || usbRetryTimer !== null) return;
+  if (!usbWanted || port || usbRetryTimer !== null) return;
   usbRetryTimer = setTimeout(async () => {
     usbRetryTimer = null;
     if (!usbWanted || port || usbConnecting) return;
@@ -491,13 +491,12 @@ if (hasWebSerial && typeof navigator.serial.addEventListener === 'function') {
   // The reader also detects disconnect; this catches it even when read() is hung.
   navigator.serial.addEventListener('disconnect', e => {
     if (usbWanted && port && e.port === port) {
-      const lost = port;
       port = null;
       cfg = null;
       alive = 0;
       state('USB перезапустился — восстанавливаю соединение...', false);
       if (usbAskTimer !== null) clearInterval(usbAskTimer), usbAskTimer = null;
-      try { reader?.cancel(); } catch (ignored) {}
+      if (reader) void reader.cancel().catch(() => {});
       scheduleUsbRecovery(1200);
     }
   });
