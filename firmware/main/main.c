@@ -470,7 +470,9 @@ static void mic_task(void *arg)
     esp_codec_dev_sample_info_t fs = {.sample_rate = AUDIO_RATE, .channel = 1, .bits_per_sample = 16};
     if (!mic || esp_codec_dev_open(mic, &fs) != ESP_CODEC_DEV_OK) {
         ESP_LOGW(TAG, "microphone init failed: no noise meter, no blowing");
+        mic_stop();
         vTaskDelete(NULL);
+        return;
     }
     esp_codec_dev_set_in_gain(mic, MIC_GAIN_DB);
     static int16_t buf[AUDIO_RATE / 50];
