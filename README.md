@@ -13,7 +13,7 @@
 
 Веб-прошивальщик публикуется автоматически из `main` через GitHub Actions. До первого успешного запуска Actions необходимо включить **Settings → Pages → Source: GitHub Actions**.
 
-Для работы без интернета скачай архив **`pip-keypet-<версия>-offline.zip`** из [Releases](https://github.com/666cossack999/Pip-KeyPet/releases), распакуй его и запусти `Pip-Windows.bat`, `Pip-Mac.command` или `Pip-Linux.sh`. При первой загрузке страницы может потребоваться интернет для библиотеки esptool-js, поскольку она подключается с CDN.
+Для локального запуска панели скачай архив **`pip-keypet-<версия>-panel.zip`** из [Releases](https://github.com/666cossack999/Pip-KeyPet/releases), распакуй его и запусти `Pip-Windows.bat`, `Pip-Mac.command` или `Pip-Linux.sh`. Для прошивки через локальную панель требуется интернет для загрузки esptool-js с CDN (если файл ещё не закеширован браузером).
 
 > **Внимание:** прошивка предназначена только для ESP32-S3-Touch-AMOLED-1.75C. Сохрани важные данные перед экспериментальной прошивкой. Скрипт использует раздельные образы, чтобы не перезаписывать NVS.
 
