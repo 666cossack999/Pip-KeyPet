@@ -58,11 +58,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload site for GitHub Pages
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: docs
 
 
   sim:
@@ -87,23 +82,9 @@ jobs:
       - name: Run complete simulation smoke suite
         run: /usr/bin/python3 sim/check.py
 
+      - name: Test firmware catalog builder
+        run: python3 -m unittest discover -s tools/tests -p 'test_firmware_catalog.py'
 
-  pages:
-    name: Publish web flasher
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [build, sim]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
 
   release:
     name: Publish GitHub Release
