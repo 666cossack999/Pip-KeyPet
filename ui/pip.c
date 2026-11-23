@@ -366,12 +366,12 @@ void pip_locate(bool on)
         if (s.react_name && !strcmp(s.react_name, "locator")) s.react_left = 0;
         return;
     }
+    bool already_running = pip_locating();
     pip_locator_start(&s.locator);
     light_up();
     react(PIP_SURPRISED, PIP_LOCATE_DURATION_S, "locator");
-    /* Repeated requests also chirp, even when the reaction is already active. */
-    if (s.react_name && !strcmp(s.react_name, "locator") && s.react_left > 0)
-        say(VOICE_ALARM);
+    /* react() rings on first start. Only refreshes need an extra chirp. */
+    if (already_running) say(VOICE_ALARM);
 }
 
 bool pip_locating(void) { return pip_locator_active(&s.locator); }
