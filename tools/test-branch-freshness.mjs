@@ -15,7 +15,7 @@ const execute = new AsyncFunction('context','github','core',script);
 assert.ok(!/github\.rest\.repos\.(merge|updateBranch)|github\.rest\.git\.updateRef|force-push/.test(script),
   'freshness check must not merge/update refs');
 
-async function run({behind, draft=false, dirty=false, oldLabel=false, eventName='pull_request'}) {
+async function run({behind, draft=false, dirty=false, oldLabel=false, labelForbidden=false, eventName='pull_request'}) {
   const events = [];
   const sha='a'.repeat(40);
   const pr={number:3,draft,head:{ref:'feature/ble-ota',sha,
@@ -38,7 +38,7 @@ async function run({behind, draft=false, dirty=false, oldLabel=false, eventName=
       issues:{
         getLabel:async()=>({}),
         createLabel:async()=>{events.push('create-label');},
-        addLabels:async v=>{events.push('add:'+v.labels[0]);},
+        addLabels:async v=>{if(labelForbidden) {const error=new Error('forbidden');error.status=403;throw error;} events.push('add:'+v.labels[0]);},
         removeLabel:async v=>{events.push('remove:'+v.name);}
       }
     }
@@ -66,4 +66,7 @@ assert.ok(!push.some(e=>e.startsWith('fail:')));
 const readOnlyPR=await run({behind:7,draft:true,eventName:'pull_request'});
 assert.ok(!readOnlyPR.some(e=>e.startsWith('add:') || e.startsWith('remove:') || e.startsWith('create-label')));
 assert.ok(!readOnlyPR.some(e=>e.startsWith('fail:')));
-console.log('ok: branch freshness workflow, draft/ready, conflict, restored freshness, no mutations of refs');
+const denied=await run({behind:7,draft:true,eventName:'push',labelForbidden:true});
+assert.ok(denied.some(e=>e.startsWith('warn:')));
+assert.ok(!denied.some(e=>e.startsWith('fail:')));
+console.log('ok: branch freshness workflow incl read-only/403 labels, draft/ready and no ref mutations');
