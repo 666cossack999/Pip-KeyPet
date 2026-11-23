@@ -89,6 +89,33 @@ jobs:
         run: node tools/test-firmware-selector.mjs
 
 
+
+  catalog_check:
+    name: Verify live Pages catalog sources
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Checkout publisher
+        uses: actions/checkout@v4
+      - name: Generate catalog from real CI artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 tools/build_firmware_catalog.py --site docs
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          cat=json.loads(Path('docs/firmware/catalog.json').read_text())
+          assert cat['versions'][0]['id'] == 'stable', cat
+          print('Validated versions:', [v['id'] for v in cat['versions']])
+          PY
+
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
