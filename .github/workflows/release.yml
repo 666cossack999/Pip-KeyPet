@@ -73,7 +73,7 @@ jobs:
       - name: Install simulation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build build-essential python3-pil
+          sudo apt-get install -y cmake ninja-build build-essential python3-pil ffmpeg
 
       - name: Compile simulator and unit tests
         run: |
