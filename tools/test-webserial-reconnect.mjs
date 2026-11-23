@@ -102,8 +102,12 @@ async function simulate({resetsOnOpen = 1} = {}) {
   b.eval('onLine(\'@C {"ver":"normal","feat":[]}\')');
   assert.equal(b.elements.state.textContent,'По кабелю');
   const closing=b.eval('closePort()');
-  await Promise.resolve(); // allow async reader.cancel() to finish and arm close delay
-  assert.ok(await b.tick(), 'closePort awaits its internal delay');
+  // Web Serial reader.cancel() settles in a separate microtask. Allow the
+  // cancellation + readLoop.finally chain to schedule the close delay.
+  for (let i=0; i<20 && !b.timeouts.size; i++)
+    await new Promise(resolve => setImmediate(resolve));
+  assert.equal(b.timeouts.size,1,'closePort awaits its internal delay');
+  assert.ok(await b.tick());
   await closing;
   assert.equal(b.closes,1);
   assert.equal(b.eval('usbWanted'),false);
