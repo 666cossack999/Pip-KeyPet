@@ -452,6 +452,20 @@ static void sensors_task(void *arg)
 /* the ES7210 microphones on the same I2S as the speaker (so the same rate): 20 ms at a time into the meter */
 static void mic_task(void *arg)
 {
+    (void)arg;
+    /* ES7210 is addressed at 0x50. Some 1.75C boards do not expose it (or it is
+       not responding at boot). Waveshare's BSP asserts when opening that codec
+       fails, rebooting Pip forever before the user can access its UI.
+       The mic is optional: continue normally with speaker/BLE/display enabled. */
+    const esp_err_t mic_probe = i2c_master_probe(bsp_i2c_get_handle(), 0x50, 50);
+    if (mic_probe != ESP_OK) {
+        ESP_LOGW(TAG, "ES7210 at I2C 0x50 unavailable (%s): microphone disabled; continuing boot",
+                 esp_err_to_name(mic_probe));
+        mic_stop();
+        vTaskDelete(NULL);
+        return;
+    }
+
     esp_codec_dev_handle_t mic = bsp_audio_codec_microphone_init();
     esp_codec_dev_sample_info_t fs = {.sample_rate = AUDIO_RATE, .channel = 1, .bits_per_sample = 16};
     if (!mic || esp_codec_dev_open(mic, &fs) != ESP_CODEC_DEV_OK) {
