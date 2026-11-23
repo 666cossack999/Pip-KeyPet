@@ -41,6 +41,10 @@ class FakeAPI:
         return image, packed(image)
 
     def get(self, url):
+        if url.startswith("pulls/3/files?"):
+            return [{"filename": "firmware/main/ota_ble.c"}]
+        if url.startswith("pulls/4/files?"):
+            return [{"filename": "LICENSE"}]
         if url.startswith("pulls?"):
             return [
                 {"number": 3,
