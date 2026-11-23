@@ -319,12 +319,14 @@ if (!('serial' in navigator)) $('nobrowser').hidden = false;
 if (!('bluetooth' in navigator)) $('ble').hidden = true;
 let fw = window.PIP_FIRMWARE;
 const stableFirmware = fw;
+let uploadedFirmware = null;
+let uploadedLabel = '';
 let firmwareMeta = {id: 'stable', label: 'Стабильная (main)', experimental: false};
 let changingFirmware = false;
 $('fwinfo').textContent = fw ? `Выбрана прошивка ${fw.version} от ${fw.built}.` : 'Файл прошивки не найден (docs/firmware/firmware.js).';
 
 function validateSelectedFirmware(value) {
-  if (!value || typeof value !== 'object' || !/^[A-Za-z0-9][A-Za-z0-9._+\\-]{0,63}$/.test(value.version) ||
+  if (!value || typeof value !== 'object' || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(value.version) ||
       !Array.isArray(value.parts) || value.parts.length < 3 || value.parts.length > 8)
     throw new Error('Некорректный формат прошивки');
   const addresses = new Set();
@@ -392,6 +394,8 @@ $('firmwareChoice').onchange = async () => {
   try {
     if (choice.value === 'stable') {
       chooseFirmware(stableFirmware, {id: 'stable', label: 'Стабильная (main)', experimental: false});
+    } else if (choice.value === 'file') {
+      chooseFirmware(uploadedFirmware, {id: 'file', label: uploadedLabel, experimental: true});
     } else {
       const response = await fetch(option.dataset.path, {cache: 'no-store'});
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -413,8 +417,10 @@ $('firmwareFile').onchange = async e => {
     if (file.size > 40_000_000) throw new Error('Файл слишком большой');
     const raw = await file.text();
     const marker = 'window.PIP_FIRMWARE = ';
-    const source = raw.includes(marker) ? raw.slice(raw.indexOf(marker) + marker.length).trim().replace(/;\\s*$/, '') : raw;
-    chooseFirmware(JSON.parse(source), {id: 'file', label: file.name, experimental: true});
+    const source = raw.includes(marker) ? raw.slice(raw.indexOf(marker) + marker.length).trim().replace(/;$/, '') : raw;
+    uploadedFirmware = validateSelectedFirmware(JSON.parse(source));
+    uploadedLabel = file.name;
+    chooseFirmware(uploadedFirmware, {id: 'file', label: uploadedLabel, experimental: true});
     // Keep the file-selected state visible without injecting an untrusted path into the option.
     const opt = document.createElement('option');
     opt.value = 'file';
