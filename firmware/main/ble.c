@@ -662,6 +662,8 @@ static void advertise(void);
 /* OTA browser is not an ANCS phone. Only authenticated OTA GATT requests call this. */
 void ble_ota_claim(uint16_t conn)
 {
+    /* Do not let another browser steal the active OTA session's peer role. */
+    if (ota_ble_active() && ota_conn != BLE_HS_CONN_HANDLE_NONE && conn != ota_conn) return;
     if (conn == pending) {
         ble_npl_callout_stop(&claim);
         pending = BLE_HS_CONN_HANDLE_NONE;
