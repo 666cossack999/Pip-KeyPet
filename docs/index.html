@@ -68,7 +68,7 @@ button:disabled{opacity:.45;cursor:default}
 :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 label,.lbl{display:block;font-size:13px;color:var(--dim);margin:0 0 4px}
-input[type=text],input[type=url],select{width:100%;font:inherit;font-size:15px;color:var(--text);background:#0d0d0f;border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-height:44px}
+input[type=text],input[type=url],select,input[type=file]{width:100%;font:inherit;font-size:15px;color:var(--text);background:#0d0d0f;border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-height:44px}
 input:focus,select:focus{border-color:var(--acc);outline:none}
 input[type=range]{width:100%;accent-color:var(--acc)}
 .fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -241,6 +241,24 @@ details p{margin:8px 0 0}
         <p id="fwinfo"></p>
       </div></div>
       <div class="cards">
+        <div class="card wide">
+          <h3>Выбор прошивки</h3>
+          <div class="fields">
+            <div>
+              <label for="firmwareChoice">Откуда взять прошивку</label>
+              <select id="firmwareChoice">
+                <option value="stable">Стабильная (main)</option>
+              </select>
+            </div>
+            <div>
+              <label for="firmwareFile">Или выбрать файл из GitHub Actions</label>
+              <input type="file" id="firmwareFile" accept=".js,.json,application/json,text/javascript">
+            </div>
+          </div>
+          <p class="muted" id="firmwareSelected">Встроенная стабильная сборка.</p>
+          <div class="notice" id="firmwareWarning" hidden>Тестовая сборка: возможны ошибки в работе устройства. Для восстановления понадобится USB.</div>
+          <p class="muted" id="firmwareCatalogStatus">Загружаю список проверенных сборок...</p>
+        </div>
         <ol class="steps wide">
           <li><b>Подключи кабель</b><span class="muted">USB-C, который передаёт данные, а не «только зарядка».</span></li>
           <li><b>Нажми «Прошить»</b><span class="muted">и выбери в списке <b>USB JTAG/serial</b>.</span></li>
@@ -299,8 +317,120 @@ const FEATS = [
 ];
 if (!('serial' in navigator)) $('nobrowser').hidden = false;
 if (!('bluetooth' in navigator)) $('ble').hidden = true;
-const fw = window.PIP_FIRMWARE;
-$('fwinfo').textContent = fw ? `В панели прошивка ${fw.version} от ${fw.built}.` : 'Файл прошивки не найден (docs/firmware/firmware.js).';
+let fw = window.PIP_FIRMWARE;
+const stableFirmware = fw;
+let firmwareMeta = {id: 'stable', label: 'Стабильная (main)', experimental: false};
+let changingFirmware = false;
+$('fwinfo').textContent = fw ? `Выбрана прошивка ${fw.version} от ${fw.built}.` : 'Файл прошивки не найден (docs/firmware/firmware.js).';
+
+function validateSelectedFirmware(value) {
+  if (!value || typeof value !== 'object' || !/^[A-Za-z0-9][A-Za-z0-9._+\\-]{0,63}$/.test(value.version) ||
+      !Array.isArray(value.parts) || value.parts.length < 3 || value.parts.length > 8)
+    throw new Error('Некорректный формат прошивки');
+  const addresses = new Set();
+  for (const p of value.parts) {
+    if (!Number.isInteger(p.address) || p.address < 0 || p.address >= 0x2000000 ||
+        addresses.has(p.address) || typeof p.data !== 'string' || p.data.length > 45_000_000 ||
+        !/^[A-Za-z0-9+/]+={0,2}$/.test(p.data))
+      throw new Error('Недопустимый адрес или двоичные данные прошивки');
+    addresses.add(p.address);
+  }
+  const app = value.parts.find(p => p.address === 0x20000);
+  if (!app || !app.data.startsWith('6') || app.data.length < 350)
+    throw new Error('Образ приложения ESP32-S3 не найден или повреждён');
+  return value;
+}
+function firmwareBusy(value) {
+  changingFirmware = value;
+  $('flash').disabled = value || !fw || !('serial' in navigator);
+  $('firmwareChoice').disabled = value;
+  $('firmwareFile').disabled = value;
+}
+function chooseFirmware(value, meta) {
+  fw = validateSelectedFirmware(value);
+  firmwareMeta = meta;
+  $('fwinfo').textContent = `Выбрана прошивка ${fw.version} от ${fw.built || 'неизвестной даты'}.`;
+  $('firmwareSelected').textContent = `${meta.label} · версия ${fw.version}${meta.commit ? ' · '+meta.commit : ''}`;
+  $('firmwareWarning').hidden = !meta.experimental;
+}
+async function listFirmwareVersions() {
+  try {
+    const response = await fetch('firmware/catalog.json', {cache: 'no-store'});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const catalog = await response.json();
+    if (catalog.schema !== 1 || !Array.isArray(catalog.versions)) throw new Error('неверный каталог');
+    const choices = $('firmwareChoice');
+    for (const version of catalog.versions) {
+      if (!version.experimental) {
+        choices.options[0].textContent = `Стабильная (main) · ${version.version}`;
+        continue;
+      }
+      if (!/^pr-[0-9]+$/.test(version.id) ||
+          version.file !== `firmware/previews/${version.id}.json` ||
+          !/^[a-f0-9]{12}$/.test(version.commit))
+        continue;
+      const option = document.createElement('option');
+      option.value = version.id;
+      option.textContent = `Тестовая · PR #${version.pr} · ${version.version} · ${version.commit}`;
+      option.dataset.path = version.file;
+      option.dataset.label = version.label;
+      option.dataset.commit = version.commit;
+      choices.appendChild(option);
+    }
+    $('firmwareCatalogStatus').textContent = choices.options.length > 1 ?
+      'Тестовые версии добавляются автоматически после успешной CI-сборки текущей ветки PR.' :
+      'Сейчас доступны только стабильная прошивка и загрузка файла.';
+  } catch (_) {
+    $('firmwareCatalogStatus').textContent =
+      'Список тестовых версий недоступен. Можно использовать стабильную прошивку или файл из GitHub Actions.';
+  }
+}
+$('firmwareChoice').onchange = async () => {
+  const choice = $('firmwareChoice');
+  const option = choice.selectedOptions[0];
+  firmwareBusy(true);
+  try {
+    if (choice.value === 'stable') {
+      chooseFirmware(stableFirmware, {id: 'stable', label: 'Стабильная (main)', experimental: false});
+    } else {
+      const response = await fetch(option.dataset.path, {cache: 'no-store'});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const image = await response.json();
+      chooseFirmware(image, {id: choice.value, label: option.dataset.label,
+        commit: option.dataset.commit, experimental: true});
+    }
+  } catch (e) {
+    $('firmwareCatalogStatus').textContent = 'Не удалось загрузить сборку: ' + e.message;
+    choice.value = 'stable';
+    if (stableFirmware) chooseFirmware(stableFirmware, {id: 'stable', label: 'Стабильная (main)', experimental: false});
+  } finally { firmwareBusy(false); }
+};
+$('firmwareFile').onchange = async e => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  firmwareBusy(true);
+  try {
+    if (file.size > 40_000_000) throw new Error('Файл слишком большой');
+    const raw = await file.text();
+    const marker = 'window.PIP_FIRMWARE = ';
+    const source = raw.includes(marker) ? raw.slice(raw.indexOf(marker) + marker.length).trim().replace(/;\\s*$/, '') : raw;
+    chooseFirmware(JSON.parse(source), {id: 'file', label: file.name, experimental: true});
+    // Keep the file-selected state visible without injecting an untrusted path into the option.
+    const opt = document.createElement('option');
+    opt.value = 'file';
+    opt.textContent = `Файл · ${file.name.slice(0, 70)}`;
+    const old = $('firmwareChoice').querySelector('option[value="file"]');
+    if (old) old.remove();
+    $('firmwareChoice').appendChild(opt);
+    $('firmwareChoice').value = 'file';
+  } catch (err) {
+    $('firmwareCatalogStatus').textContent = 'Ошибка файла: ' + err.message;
+    $('firmwareChoice').value = 'stable';
+    if (stableFirmware) chooseFirmware(stableFirmware, {id: 'stable', label: 'Стабильная (main)', experimental: false});
+  } finally { firmwareBusy(false); }
+};
+if (fw) chooseFirmware(fw, firmwareMeta);
+void listFirmwareVersions();
 
 /* ---------- the link: a USB serial port (Web Serial) or Bluetooth ---------- */
 let port = null, reader = null, ble = null, bleq = Promise.resolve(), alive = 0, cfg = null;
@@ -445,7 +575,10 @@ $('devOff').onclick = () => send('dev 0');
 
 /* ---------- flashing (esptool-js) ---------- */
 $('flash').onclick = async () => {
-  if (!fw) return;
+  if (!fw || changingFirmware) return;
+  if (firmwareMeta.experimental &&
+      !confirm(`ТЕСТОВАЯ ПРОШИВКА ${fw.version} (${firmwareMeta.label}).\\nВозможны ошибки и восстановление по USB. Продолжить?`))
+    return;
   const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
   $('flash').disabled = true;
   try {
