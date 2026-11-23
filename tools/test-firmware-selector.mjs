@@ -22,7 +22,7 @@ const end = moduleCode.indexOf("let fw = window.PIP_FIRMWARE;", start);
 assert.ok(start >= 0 && end > start, 'Expected isolated browser feature-detection section');
 const browserChecks = moduleCode.slice(start, end);
 function simulateBrowser({serial, bluetooth}) {
-  const elements = Object.fromEntries(['nobrowser','usb','ble','flash'].map(id => [id, {hidden:false,disabled:false}]));
+  const elements = Object.fromEntries(['nobrowser','usb','ble','flash','bleFlash'].map(id => [id, {hidden:false,disabled:false}]));
   const navigator = {};
   if (serial) navigator.serial = {requestPort() {}};
   if (bluetooth) navigator.bluetooth = {requestDevice() {}};
@@ -41,6 +41,7 @@ function simulateBrowser({serial, bluetooth}) {
   assert.equal(elements.usb.hidden,true);
   assert.equal(elements.ble.hidden,false);
   assert.equal(elements.flash.disabled,true);
+  assert.equal(elements.bleFlash.disabled,false);
 }
 {
   const {elements} = simulateBrowser({serial:true,bluetooth:false}); // desktop without BLE
@@ -48,12 +49,14 @@ function simulateBrowser({serial, bluetooth}) {
   assert.equal(elements.usb.hidden,false);
   assert.equal(elements.ble.hidden,true);
   assert.equal(elements.flash.disabled,false);
+  assert.equal(elements.bleFlash.disabled,true);
 }
 {
   const {elements} = simulateBrowser({serial:false,bluetooth:false}); // Safari
   assert.equal(elements.nobrowser.hidden,false);
   assert.equal(elements.usb.hidden,true);
   assert.equal(elements.ble.hidden,true);
+  assert.equal(elements.bleFlash.disabled,true);
 }
 {
   const {elements} = simulateBrowser({serial:true,bluetooth:true}); // desktop full support
