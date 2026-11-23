@@ -1,0 +1,53 @@
+name: Publish firmware catalog (Pages)
+
+on:
+  workflow_run:
+    workflows:
+      - Build firmware, web flasher and release
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: firmware-catalog-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish stable + green PR previews
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout trusted site publisher from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Build static Pages catalog from verified CI artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 tools/build_firmware_catalog.py --site docs
+          python3 -m unittest discover -s tools/tests -p 'test_firmware_catalog.py'
+
+      - name: Upload GitHub Pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

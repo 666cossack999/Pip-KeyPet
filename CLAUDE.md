@@ -161,3 +161,21 @@ Our `main` is the source of truth; the original repository is an optional source
 - Never delete `main`, protected/long-lived environment branches, unmerged branches, or an active draft PR (such as a BLE OTA feature pending hardware testing). Never force-delete a branch that gained new commits after merge.
 - Keep the merged PR and its commit history for audit. The cleanup workflow `.github/workflows/cleanup-merged-branches.yml` automates deletion for future merged PRs, and performs an explicitly reviewed one-time cleanup of historical merged PRs #1 and #2.
 - After any merge, verify that the source branch was deleted; if Actions could not delete it, report the failure rather than claiming success.
+
+## Web firmware selector and CI Pages previews
+
+- `docs/index.html` selects a firmware object, not arbitrary source code: keep stable
+  `window.PIP_FIRMWARE` as fallback and support validated JSON previews and local firmware.js files.
+  Never eval or import a PR firmware.js from an untrusted origin.
+- `tools/build_firmware_catalog.py` builds `firmware/catalog.json` plus same-origin preview
+  JSON files from the successful GitHub Actions artifact of the **current PR head SHA**.
+  Previews must come from PRs whose head repository is this repository and whose changed files\n  include firmware/UI code or device build dependencies; skip external forks and docs-only PRs.
+- Only the trusted `main` workflow `.github/workflows/publish-firmware-catalog.yml`
+  may deploy Pages. It downloads CI artifacts as data without executing branch code.
+  Do not give deployment credentials to PR build jobs.
+- `.github/workflows/release.yml` only builds/tests and publishes tagged GitHub Releases;
+  the separate catalog publisher updates GitHub Pages on completed successful CI runs.
+- Preserve the firmware chooser during upstream merges and while later merging BLE OTA PR #3;
+  the BLE OTA button should use the same selected firmware object.
+- Run `python3 -m unittest discover -s tools/tests -p test_firmware_catalog.py` and
+  `node tools/test-firmware-selector.mjs` when changing the release pipeline or selector.
