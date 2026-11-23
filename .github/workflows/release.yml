@@ -60,10 +60,34 @@ jobs:
         with:
           path: docs
 
+
+  sim:
+    name: Simulator and behavior regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with LVGL submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install simulation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential python3-pil
+
+      - name: Compile simulator and unit tests
+        run: |
+          cmake -S sim -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+
+      - name: Run complete simulation smoke suite
+        run: /usr/bin/python3 sim/check.py
+
+
   pages:
     name: Publish web flasher
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: build
+    needs: [build, sim]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -80,7 +104,7 @@ jobs:
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, sim]
     runs-on: ubuntu-latest
     permissions:
       contents: write
