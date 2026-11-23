@@ -10,10 +10,12 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import http.client
 import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -90,13 +92,23 @@ class Github:
             "User-Agent": "pip-keypet-firmware-catalog",
         })
         opener = urllib.request.build_opener(SafeGithubRedirect)
-        with opener.open(req, timeout=60) as response:
-            if binary:
-                data = response.read(MAX_ARTIFACT + 1)
-                if len(data) > MAX_ARTIFACT:
-                    raise ValueError("CI artifact is too large")
-                return data
-            return json.load(response)
+        for attempt in range(3):
+            try:
+                with opener.open(req, timeout=60) as response:
+                    if binary:
+                        data = response.read(MAX_ARTIFACT + 1)
+                        if len(data) > MAX_ARTIFACT:
+                            raise ValueError("CI artifact is too large")
+                        return data
+                    return json.load(response)
+            except (urllib.error.URLError, http.client.RemoteDisconnected,
+                    ConnectionError, TimeoutError) as exc:
+                if isinstance(exc, urllib.error.HTTPError) and exc.code not in (429, 500, 502, 503, 504):
+                    raise
+                if attempt == 2:
+                    raise
+                print(f"Temporary GitHub request error; retry {attempt + 1}/2: {exc}")
+                time.sleep(1 << attempt)
 
     def successful_run(self, branch: str, sha: str | None = None):
         query = urllib.parse.urlencode({"branch": branch, "status": "success", "per_page": 100})
@@ -151,7 +163,12 @@ def build_catalog(api: Github, site: Path, max_previews: int = 10):
             break
         if (pr.get("head", {}).get("repo") or {}).get("full_name") != api.repo:
             continue  # never publish a build of a third-party fork as a trusted preview
-        changed_files = api.get(f"pulls/{pr['number']}/files?per_page=100")
+        try:
+            changed_files = api.get(f"pulls/{pr['number']}/files?per_page=100")
+        except (urllib.error.URLError, http.client.RemoteDisconnected,
+                ConnectionError, TimeoutError, OSError) as exc:
+            print(f"Skip PR #{pr['number']}: GitHub cannot list changed files ({exc})")
+            continue
         relevant = any(
             file.get("filename", "").startswith(("firmware/", "ui/", "third_party/"))
             or file.get("filename") in (".gitmodules", "tools/release.sh")
@@ -161,13 +178,19 @@ def build_catalog(api: Github, site: Path, max_previews: int = 10):
             print(f"Skip PR #{pr['number']}: no firmware/UI source changes")
             continue
         head = pr["head"]
-        run = api.successful_run(head["ref"], head["sha"])
+        try:
+            run = api.successful_run(head["ref"], head["sha"])
+        except (urllib.error.URLError, http.client.RemoteDisconnected,
+                ConnectionError, TimeoutError, OSError) as exc:
+            print(f"Skip PR #{pr['number']}: GitHub cannot verify head build ({exc})")
+            continue
         if not run:
             print(f"Skip PR #{pr['number']}: no green build for current head")
             continue
         try:
             fw, _ = api.firmware_for_run(run)
-        except (ValueError, KeyError, urllib.error.HTTPError) as exc:
+        except (ValueError, KeyError, urllib.error.URLError, http.client.RemoteDisconnected,
+                ConnectionError, TimeoutError, OSError) as exc:
             print(f"Skip PR #{pr['number']}: {exc}")
             continue
         name = f"pr-{pr['number']}.json"
