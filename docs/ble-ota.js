@@ -77,10 +77,10 @@ export async function flashBleOta(firmware, progress = () => {}, notify = () => 
     if (current.state === 1 || current.state === 2)
       throw new Error('На Пипе уже выполняется OTA. Заверши или отмени его перед повтором.');
 
-    const begin = new Uint8Array(37);
+    // Each control request fits the minimum BLE MTU (23 bytes).
+    const begin = new Uint8Array(5);
     begin[0] = 1;
     new DataView(begin.buffer).setUint32(1, bytes.length, true);
-    begin.set(digest, 5);
     try {
       await writeAck(ctl, begin);
     } catch (error) {
@@ -90,6 +90,8 @@ export async function flashBleOta(firmware, progress = () => {}, notify = () => 
       throw error;
     }
     begun = true;
+    await writeAck(ctl, Uint8Array.of(5, ...digest.subarray(0, 16)));
+    await writeAck(ctl, Uint8Array.of(6, ...digest.subarray(16, 32)));
     notify('Передаю прошивку. Не закрывай страницу и не выключай Пипа.');
     let offset = 0;
     let packet = DEFAULT_PACKET;
