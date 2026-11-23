@@ -58,11 +58,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload site for GitHub Pages
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: docs
 
 
   sim:
@@ -87,26 +82,48 @@ jobs:
       - name: Run complete simulation smoke suite
         run: /usr/bin/python3 sim/check.py
 
+      - name: Test firmware catalog builder
+        run: python3 -m unittest discover -s tools/tests -p 'test_firmware_catalog.py'
+
+      - name: Check firmware selector UI syntax
+        run: node tools/test-firmware-selector.mjs
+
+      - name: Test main branch freshness monitor
+        run: node tools/test-branch-freshness.mjs
+
       - name: Test BLE OTA browser protocol
         run: node tools/test-ble-ota.mjs
 
+      - name: Check BLE OTA and firmware selector integration
+        run: node tools/test-ota-selector-integration.mjs
 
-  pages:
-    name: Publish web flasher
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [build, sim]
+
+
+  catalog_check:
+    name: Verify live Pages catalog sources
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      actions: read
+      pull-requests: read
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Checkout publisher
+        uses: actions/checkout@v4
+      - name: Generate catalog from real CI artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 tools/build_firmware_catalog.py --site docs
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          cat=json.loads(Path('docs/firmware/catalog.json').read_text())
+          assert cat['versions'][0]['id'] == 'stable', cat
+          print('Validated versions:', [v['id'] for v in cat['versions']])
+          PY
 
   release:
     name: Publish GitHub Release
