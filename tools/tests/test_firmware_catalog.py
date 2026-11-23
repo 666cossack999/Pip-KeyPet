@@ -1,5 +1,6 @@
 """Offline tests for Pages firmware catalog and CI artifact validation."""
 import base64
+import http.client
 import json
 import tempfile
 import unittest
@@ -98,6 +99,19 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual(validate_firmware(stable_path.read_text())["version"], "1.1.0")
             self.assertEqual(json.loads(preview_path.read_text())["version"], "1.2.0-rc1")
             self.assertEqual(json.loads((root / "firmware/catalog.json").read_text()), out)
+
+    def test_transient_pr_listing_failure_does_not_block_stable(self):
+        class NetworkFlaky(FakeAPI):
+            def get(self, url):
+                if url.startswith("pulls/3/files?"):
+                    raise http.client.RemoteDisconnected("Remote endpoint dropped")
+                return super().get(url)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out = build_catalog(NetworkFlaky(), root)
+            self.assertEqual([v["id"] for v in out["versions"]], ["stable"])
+            self.assertTrue((root / "firmware/firmware.js").is_file())
 
     def test_main_run_required(self):
         class MissingMain(FakeAPI):
