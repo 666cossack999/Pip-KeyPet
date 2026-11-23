@@ -1,92 +1,50 @@
-# Пип — питомец в брелоке
+# Pip-KeyPet
 
-Пип живёт в круглом брелоке с экраном: смотрит на тебя, радуется, обижается, засыпает, просит погулять и поесть.
-Ещё он показывает уведомления с iPhone, управляет музыкой, бывает бейджем, QR-визиткой, пультом для презентаций,
-шумомером, и в нём есть мини-игры.
+Виртуальный питомец для **Waveshare ESP32-S3-Touch-AMOLED-1.75C**: эмоции, мини-игры, уведомления iPhone, BLE, QR-визитка и настройки через браузер.
 
-*English below.*
+## Прошивка через браузер
 
-## Что нужно
+**[Открыть веб-прошивальщик](https://666cossack999.github.io/Pip-KeyPet/)**
 
-- **Брелок Waveshare ESP32-S3-Touch-AMOLED-1.75C** (продаётся на AliExpress, Amazon и у Waveshare).
-- **Кабель USB-C**, который передаёт данные (не «только для зарядки»).
-- **Компьютер** с Windows, macOS или Linux и браузер **Google Chrome** или **Microsoft Edge**.
+1. Подключи брелок к компьютеру кабелем USB-C с передачей данных.
+2. Открой страницу в **Chrome** или **Edge** на компьютере.
+3. Перейди во вкладку **«Прошить / обновить»**, нажми **«Прошить»** и выбери **USB JTAG/serial**.
+4. Дождись окончания прошивки, затем открой **«Настройки»**.
 
-## Как прошить своего Пипа (3 шага)
+Веб-прошивальщик публикуется автоматически из `main` через GitHub Actions. До первого успешного запуска Actions необходимо включить **Settings → Pages → Source: GitHub Actions**.
 
-**Самый простой путь:** открой в Chrome или Edge **https://novikovvisuals.github.io/Pip-KeyPet/**, подключи брелок
-кабелем, нажми «Подключить по кабелю», затем вкладка **«Прошить / обновить»** → **«Прошить»**. Ничего скачивать не надо.
+Для локального запуска панели скачай архив **`pip-keypet-<версия>-panel.zip`** из [Releases](https://github.com/666cossack999/Pip-KeyPet/releases), распакуй его и запусти `Pip-Windows.bat`, `Pip-Mac.command` или `Pip-Linux.sh`. Для прошивки через локальную панель требуется интернет для загрузки esptool-js с CDN (если файл ещё не закеширован браузером).
 
-Без интернета — так:
+> **Внимание:** прошивка предназначена только для ESP32-S3-Touch-AMOLED-1.75C. Сохрани важные данные перед экспериментальной прошивкой. Скрипт использует раздельные образы, чтобы не перезаписывать NVS.
 
-1. **Скачай Пипа.** На этой странице нажми зелёную кнопку **Code → Download ZIP** и распакуй архив.
-2. **Открой панель.** В распакованной папке дважды щёлкни файл для своей системы:
-   - Windows — **`Pip-Windows.bat`**
-   - macOS — **`Pip-Mac.command`** (если Mac не даёт открыть: правый клик → «Открыть» → «Открыть»)
-   - Linux — **`Pip-Linux.sh`**
+## Релизы
 
-   Откроется панель Пипа в браузере.
-3. **Прошей.** Подключи брелок кабелем, открой вкладку **«Прошить / обновить»**, нажми **«Прошить»**
-   и выбери в списке **USB JTAG/serial**. Через минуту Пип проснётся.
+- Каждый push в `main` собирает прошивку и публикует страницу с актуальным образом.
+- Тег `vX.Y.Z` запускает сборку и создаёт [GitHub Release](https://github.com/666cossack999/Pip-KeyPet/releases) с бинарниками и архивом панели.
+- Версия в теге должна совпадать с `PROJECT_VER` в `firmware/CMakeLists.txt`.
+- В pull request сборка проверяется, но релиз и сайт не публикуются.
 
-Дальше на вкладке **«Настройки»** впиши своё имя для бейджа и свои ссылки для QR, выбери, через сколько Пип будет
-засыпать, и включи или выключи то, что нужно. Всё сохраняется в самом брелоке.
-
-**iPhone:** Настройки → Bluetooth → Pip, затем подтверди код на брелоке верхней кнопкой. Разреши показывать
-уведомления, когда iPhone спросит.
-
-## Если что-то не так
-
-- **Брелок не виден в списке.** Попробуй другой кабель или другой USB-порт. На Linux один раз выполни
-  `sudo usermod -aG dialout $USER` и перезайди в систему.
-- **Прошивка не начинается.** Зажми нижнюю кнопку брелока, коротко нажми верхнюю и отпусти нижнюю — брелок войдёт в
-  режим прошивки. Нажми «Прошить» ещё раз.
-- **Страница пишет, что браузер не подходит.** Открой её в Chrome или Edge: Safari и Firefox не умеют работать с USB.
-- **Батарея быстро садится.** В настройках поставь «засыпать через 15–30 секунд»: экран и рисование лица — почти весь
-  расход.
-
-## Что умеет Пип
-
-- **Характер:** около 45 эмоций; настроение складывается из еды, сна, игр, внимания и прогулок, времени суток и того,
-  что с ним происходит. Гладь его, тряси, переворачивай экраном вниз, дуй на него, знакомь с людьми (нижняя кнопка).
-- **Приложения:** часы, уход за Пипом, Quick QR, шумомер, бейдж, таймер, секундомер, фонарик, стиль, Bluetooth,
-  уведомления, музыка, камера (кнопка спуска для iPhone), пульт для презентаций (листание, указка, скролл,
-  перетаскивание) и игры: шарик, бесконечные крестики-нолики, шар-восьмёрка, монетка, кубик, лабиринт.
-- **Энергосбережение:** засыпает сам, просыпается от касания, кнопки, если взять в руку, и при уведомлении.
-- **Приватность:** уведомления по умолчанию скрыты до открытия; коды, пароли и банки не хранятся вообще.
-
-## Для разработчиков
-
-`ui/` — переносимый C + LVGL 9.5, общий для трёх сборок: прошивки (ESP-IDF 5.5), симулятора в браузере и
-консольного рекордера с проверками. Подробности — в [CLAUDE.md](CLAUDE.md).
-
-```
-git submodule update --init                                     # LVGL
-cmake -S sim -B build -G Ninja && cmake --build build && python3 sim/check.py   # симулятор и проверки
-emcmake cmake -S sim -B build-web -G Ninja && cmake --build build-web && python3 sim/serve.py   # веб-симулятор
-. ~/esp/esp-idf/export.sh && firmware/flash.sh                  # своя сборка на плату, с логом
-tools/release.sh                                                # прошивка для панели: docs/firmware/firmware.js
+Создать тег релиза после успешной проверки:
+```bash
+git checkout main
+git pull
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
-Панель — это `docs/index.html` (настройки и прошивка, Web Serial и Web Bluetooth прямо из браузера) и
-`docs/debug.html` (дерево эмоций, история, показ эмоций, ручки правил, режим разработчика).
+## Разработка
 
----
+```bash
+git submodule update --init --recursive
+# Требуется ESP-IDF 5.5
+tools/release.sh
+python3 tools/package-release.py
+```
 
-## English
+Исходники прошивки — `firmware/`; интерфейс — `ui/`; веб-панель — `docs/`; инструменты — `tools/`.
 
-**Pip** is a pet living in a round keychain (Waveshare ESP32-S3-Touch-AMOLED-1.75C). Easiest: open
-**https://novikovvisuals.github.io/Pip-KeyPet/** in Chrome or Edge. Offline: download this
-repository as a ZIP, unzip, double-click `Pip-Windows.bat`, `Pip-Mac.command` or `Pip-Linux.sh`, plug the keychain in
-with a USB-C data cable, open **«Прошить / обновить»** (Flash / update) and press **«Прошить»** (Flash), choosing
-**USB JTAG/serial**. Chrome or Edge is required (Web Serial). Settings — your badge name, your QR links, sleep timer,
-brightness, sounds and reactions — are on the **«Настройки»** (Settings) tab and are stored on the keychain.
+## License / Лицензия
 
-## Лицензия / License
+MIT, см. [LICENSE](LICENSE). Уведомление об авторских правах оригинального кода сохранено в файле лицензии.
 
-MIT — см. [LICENSE](LICENSE).
-
-## Благодарности / Credits
-
-[LVGL](https://lvgl.io) (MIT), [esptool-js](https://github.com/espressif/esptool-js) (Apache-2.0),
-шрифты JetBrains Mono и IBM Plex Mono (SIL OFL), иконки [Font Awesome Free](https://fontawesome.com) (SIL OFL / CC BY 4.0).
+Сторонние компоненты: [LVGL](https://lvgl.io) (MIT), [esptool-js](https://github.com/espressif/esptool-js) (Apache-2.0), JetBrains Mono и IBM Plex Mono (SIL OFL), Font Awesome Free (SIL OFL / CC BY 4.0).
