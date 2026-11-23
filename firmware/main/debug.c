@@ -209,7 +209,7 @@ static void config(void) /* @C: everything the settings page shows */
         json_str(t, sizeof t, l->handle), n += snprintf(b + n, sizeof b - n, "%s,", t);
         json_str(t, sizeof t, l->url), n += snprintf(b + n, sizeof b - n, "%s]", t);
     }
-    snprintf(b + n, sizeof b - n, "]}\n");
+    snprintf(b + n, sizeof b - n, "],\"locate\":1}\n");
     put(b);
 }
 
@@ -250,6 +250,7 @@ static void command(char *line)
     const char *c = arg[0];
     float a1 = n > 1 ? strtof(arg[1], NULL) : 0, a2 = n > 2 ? strtof(arg[2], NULL) : 0;
     pet_t *p = pip_pet();
+    int locator_command = -1;
     if (!strcmp(c, "hist")) { hist_dump(); return; }
     if (!strcmp(c, "names")) { names(); return; }
     if (!strcmp(c, "tune")) { tune(); return; }
@@ -286,6 +287,10 @@ static void command(char *line)
     else if (!strcmp(c, "home")) shell_home();
     else if (!strcmp(c, "btn") && n > 1) shell_button((int)a1), shell_button_up((int)a1); /* a press, let go at once */
     else if (!strcmp(c, "meet")) pip_meet();
+    else if (!strcmp(c, "locate") && n > 1) {
+        pip_locate(a1 != 0);
+        locator_command = pip_locating() ? 1 : 0;
+    }
     else if (!strcmp(c, "update")) shell_updating(); /* the panel flashes next */
     else if (!strcmp(c, "dev")) pip_dev(n > 1 ? a1 != 0 : !pip_dev_on()); /* the developer overlay */
     else if (!strcmp(c, "feed")) pip_action(PIP_ACT_FEED);
@@ -293,6 +298,7 @@ static void command(char *line)
     else if (!strcmp(c, "sleep")) pet_event(p, PET_SLEEP);
     else if (!strcmp(c, "wake")) pet_event(p, PET_WAKE);
     ui_unlock();
+    if (locator_command >= 0) put(locator_command ? "@F 1\n" : "@F 0\n");
     if (!strcmp(c, "urge") || !strcmp(c, "pool") || !strcmp(c, "set")) tune();
 }
 
