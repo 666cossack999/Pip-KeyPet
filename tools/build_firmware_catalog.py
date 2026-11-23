@@ -64,6 +64,17 @@ def validate_firmware(content: str) -> dict:
     return {"version": fw["version"], "built": str(fw.get("built", ""))[:30], "parts": fw["parts"]}
 
 
+class SafeGithubRedirect(urllib.request.HTTPRedirectHandler):
+    """Never send GITHUB_TOKEN to the signed blob storage behind Actions artifacts."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected and urllib.parse.urlsplit(req.full_url).netloc != urllib.parse.urlsplit(redirected.full_url).netloc:
+            redirected.remove_header("Authorization")
+            redirected.remove_header("authorization")
+        return redirected
+
+
 class Github:
     def __init__(self, repo: str, token: str):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
@@ -78,7 +89,8 @@ class Github:
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "pip-keypet-firmware-catalog",
         })
-        with urllib.request.urlopen(req, timeout=60) as response:
+        opener = urllib.request.build_opener(SafeGithubRedirect)
+        with opener.open(req, timeout=60) as response:
             if binary:
                 data = response.read(MAX_ARTIFACT + 1)
                 if len(data) > MAX_ARTIFACT:
