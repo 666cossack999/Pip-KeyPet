@@ -1,0 +1,105 @@
+name: Check feature branches against main
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1-5'
+
+# This workflow NEVER merges, rebases, force-pushes, or deletes branches.
+# PRs from outside forks are skipped; no untrusted PR code is checked out.
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: branch-freshness-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  freshness:
+    name: Report stale open PR branches
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Report and label behind-main PRs (no automatic merge)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const {owner, repo} = context.repo;
+            const repository = `${owner}/${repo}`;
+            const labels = [
+              {name: 'needs-main-sync', color: 'D97706', description: 'Feature branch is behind main. Sync and rerun CI before merging.'},
+              {name: 'main-sync-conflict', color: 'B42318', description: 'Cannot merge main automatically; resolve conflicts manually.'}
+            ];
+            for (const label of labels) {
+              try {
+                await github.rest.issues.getLabel({owner,repo,name:label.name});
+              } catch (e) {
+                if (e.status !== 404) throw e;
+                try { await github.rest.issues.createLabel({owner,repo,...label}); }
+                catch (other) { if (other.status !== 422) throw other; }
+              }
+            }
+
+            const prs = await github.paginate(github.rest.pulls.list,
+              {owner,repo,state:'open',base:'main',per_page:100});
+            const rows = [['PR', 'Ветка', 'Позади main', 'Конфликты', 'Состояние']];
+            const errors = [];
+            let currentBehind = null;
+            for (const pr of prs) {
+              if (pr.head.repo?.full_name !== repository) continue;
+              try {
+                // Compare exactly the PR HEAD SHA, never use a branch name from a PR as code.
+                const comparison = await github.request('GET /repos/{owner}/{repo}/compare/{basehead}', {
+                  owner, repo, basehead: `main...${pr.head.sha}`
+                });
+                const behind = comparison.data.behind_by;
+                // GitHub may return null while it calculates mergeability.
+                const info = (await github.rest.pulls.get({owner,repo,pull_number:pr.number})).data;
+                if (info.head.sha !== pr.head.sha) {
+                  core.warning(`PR #${pr.number} changed while checking; retry on next run`);
+                  continue;
+                }
+                const hasConflict = info.mergeable === false && info.mergeable_state === 'dirty';
+                const desired = new Set();
+                if (behind > 0) desired.add('needs-main-sync');
+                if (behind > 0 && hasConflict) desired.add('main-sync-conflict');
+                const existing = new Set(info.labels.map(l => l.name));
+                for (const name of labels.map(l => l.name)) {
+                  if (desired.has(name) && !existing.has(name)) {
+                    await github.rest.issues.addLabels({owner,repo,issue_number:pr.number,labels:[name]});
+                  } else if (!desired.has(name) && existing.has(name)) {
+                    await github.rest.issues.removeLabel({owner,repo,issue_number:pr.number,name});
+                  }
+                }
+                rows.push([`#${pr.number}`, pr.head.ref, String(behind),
+                  hasConflict ? 'Да' : info.mergeable === null ? 'Не определено' : 'Нет',
+                  pr.draft ? 'Draft · проверка при готовности' : behind ? 'Требуется синхронизация' : 'Актуальна']);
+                core.info(`PR #${pr.number}: behind main=${behind}, conflict=${hasConflict}, draft=${pr.draft}`);
+                if (context.eventName === 'pull_request' && context.payload.pull_request?.number === pr.number) {
+                  currentBehind = behind;
+                }
+              } catch (e) {
+                const message = `PR #${pr.number}: GitHub comparison failed: ${e.message}`;
+                core.warning(message);
+                errors.push(message);
+              }
+            }
+            await core.summary.addHeading('Feature branch freshness vs main').addTable(rows).write();
+            if (errors.length) {
+              core.setFailed('Could not check every feature branch: ' + errors.join('; '));
+            }
+            // Draft PRs remain WIP. Once marked ready for review, CI requires the
+            // feature branch to contain the current main commit before final merge.
+            if (context.eventName === 'pull_request' &&
+                !context.payload.pull_request?.draft && currentBehind !== null && currentBehind > 0) {
+              core.setFailed(`PR #${context.payload.pull_request.number} is ${currentBehind} commits behind main. Merge main into your feature branch and rerun CI.`);
+            }
