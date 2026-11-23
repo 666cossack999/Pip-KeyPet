@@ -453,7 +453,7 @@ let port = null, reader = null, ble = null, bleq = Promise.resolve(), alive = 0,
 // ESP32-S3's built-in USB Serial/JTAG can re-enumerate when CDC control
 // signals are changed. Recover only explicitly requested USB connections.
 let usbWanted = false, usbGeneration = 0, usbReopens = 0, usbConnecting = false;
-let usbAskTimer = null, usbRetryTimer = null, usbRecoveryStart = 0;
+let usbAskTimer = null, usbRetryTimer = null, usbRecoveryStart = 0, usbPortInfo = null;
 const USB_MAX_REOPENS = 2, USB_RECOVERY_MS = 18000;
 function clearUsbTimers() {
   if (usbAskTimer !== null) clearInterval(usbAskTimer), usbAskTimer = null;
@@ -477,10 +477,16 @@ function scheduleUsbRecovery(delay = 1000) {
       // getPorts() requires no new gesture: only previously authorised ports.
       const ports = await navigator.serial.getPorts();
       if (!usbWanted || port) return; // manual close while getPorts was pending
-      const p = ports.find(x => x.getInfo?.().usbVendorId === 0x303a);
-      if (p) {
+      const matches = ports.filter(x => {
+        const info = x.getInfo?.();
+        return info?.usbVendorId === usbPortInfo?.usbVendorId &&
+               info?.usbProductId === usbPortInfo?.usbProductId;
+      });
+      if (matches.length > 1) {
+        usbFailure('Найдено несколько одинаковых USB-устройств — выбери порт вручную.');
+      } else if (matches.length === 1) {
         usbReopens++;
-        await openPort(p, true);
+        await openPort(matches[0], true);
       } else scheduleUsbRecovery(1200); // waiting for Windows to re-enumerate COM
     } catch (e) { scheduleUsbRecovery(1500); }
   }, delay);
@@ -581,6 +587,12 @@ async function openPort(p, recovery = false) {
     clearUsbTimers();
     usbReopens = 0;
     usbRecoveryStart = Date.now();
+    usbPortInfo = p.getInfo?.() || null;
+    // Nothing but the Espressif USB Serial/JTAG interface is eligible.
+    if (usbPortInfo?.usbVendorId !== 0x303a) {
+      usbFailure('Выбран не ESP32-S3 USB Serial/JTAG');
+      return null;
+    }
   }
   usbWanted = true;
   usbConnecting = true;
