@@ -110,13 +110,13 @@ static void status(void)
              "@S {\"m\":\"%s\",\"mi\":%d,\"r\":\"%s\",\"auto\":%d,\"sl\":%d,\"n\":[%.3f,%.3f,%.3f,%.3f,%.3f],\"day\":%.3f,"
              "\"an\":%.2f,\"v\":%.3f,\"h\":%d,\"why\":[%d,%d,%.3f],\"st\":%d,\"bat\":%d,\"ch\":%d,\"db\":%.0f,\"fms\":%.1f,"
              "\"feat\":%u,\"scr\":\"%s\",\"t\":%lld,\"demo\":%d,\"af\":[%d,%d,%lld],\"rare\":[%d,%lld],\"un\":%.2f,\"wk\":%.1f,"
-             "\"wake\":%lld,\"pool\":%d,\"hold\":[%d,%lld],\"fw\":[%.0f,\"%s\",\"%s\"]}\n",
+             "\"wake\":%lld,\"pool\":%d,\"hold\":[%d,%lld],\"fw\":[%.0f,\"%s\",\"%s\"],\"locating\":%d}\n",
              in.mood, pip_find_mood(in.mood), in.reaction, in.auto_mood, in.asleep, p->food, p->energy, p->fun, p->love, p->walk,
              p->day_mood, p->annoy, pet_valence(p), in.hour, w.kind, w.which, w.value, in.steps, bat, ch, mic_on() ? mic_db() : -1,
              in.frame_ms, feat, shell_where(), (long long)time(NULL), demo_s,
              p->after_mood, p->after_why, (long long)(p->after_until - p->last), p->rare_mood, (long long)(p->rare_at - p->last),
              p->unseen, p->stride, (long long)(p->woke_at ? p->last - p->woke_at : -1), p->pool, p->hold,
-             (long long)(p->hold >= 0 ? p->last - p->hold_since : 0), fw, fw_mood, fw_react);
+             (long long)(p->hold >= 0 ? p->last - p->hold_since : 0), fw, fw_mood, fw_react, pip_locating());
     put(b);
 }
 
