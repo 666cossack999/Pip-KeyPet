@@ -61,11 +61,11 @@ with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
     zf.write(BUILD / "flash_args", "flash_args")
     for part in parts:
         zf.write(BUILD / part["file"], part["file"])
-offline = out_dir / f"pip-keypet-{version}-offline.zip"
-with zipfile.ZipFile(offline, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+panel = out_dir / f"pip-keypet-{version}-panel.zip"
+with zipfile.ZipFile(panel, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
     for name in ("Pip-Windows.bat", "Pip-Mac.command", "Pip-Linux.sh"):
         zf.write(ROOT / name, name)
     for file in sorted((ROOT / "docs").rglob("*")):
         if file.is_file():
             zf.write(file, file.relative_to(ROOT))
-print(f"Validated {len(parts)} flash parts; created {archive.name} and {offline.name}")
+print(f"Validated {len(parts)} flash parts; created {archive.name} and {panel.name}")
