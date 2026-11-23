@@ -94,6 +94,21 @@ async function simulate({resetsOnOpen = 1} = {}) {
   assert.equal(b.eval('cfg.ver'),'test');
 }
 
+// A normal device must connect once and close without triggering recovery.
+{
+  const b=await simulate({resetsOnOpen:0});
+  await b.elements.usb.onclick();
+  assert.equal(b.opens,1);
+  b.eval('onLine(\'@C {"ver":"normal","feat":[]}\')');
+  assert.equal(b.elements.state.textContent,'По кабелю');
+  const closing=b.eval('closePort()');
+  assert.ok(await b.tick(), 'closePort awaits its internal delay');
+  await closing;
+  assert.equal(b.closes,1);
+  assert.equal(b.eval('usbWanted'),false);
+  assert.equal(b.timeouts.size,0);
+}
+
 // If every open causes a reset, stop retrying; no endless boot/reconnect loop.
 {
   const b=await simulate({resetsOnOpen:99});
