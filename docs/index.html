@@ -153,13 +153,14 @@ details p{margin:8px 0 0}
       <button data-tab="dev">Для разработчиков</button>
     </nav>
 
-    <footer>Работает в Chrome и Edge. Ничего не устанавливается: страница говорит с брелоком прямо из браузера.
+    <footer>По USB — Chrome/Edge на компьютере. По Bluetooth — Chrome/Edge или браузер Bluefy на iPhone.
       <a href="https://github.com/666cossack999/Pip-KeyPet" target="_blank" rel="noopener">Исходный код</a></footer>
   </aside>
 
   <main>
     <div class="notice" id="nobrowser" hidden>
-      Этот браузер не умеет работать с брелоком. Открой эту страницу в <b>Google Chrome</b> или <b>Microsoft Edge</b> на компьютере.
+      В этом браузере недоступны Web Serial и Web Bluetooth. Для USB используй <b>Chrome/Edge на компьютере</b>,
+      для Bluetooth на iPhone — браузер <b>Bluefy</b>. Обычный Safari не поддерживает Web Bluetooth.
     </div>
 
     <section data-tab="settings">
@@ -248,7 +249,7 @@ details p{margin:8px 0 0}
         </ol>
         <div class="card wide">
           <div class="flashbox">
-            <button class="main" id="flash">Прошить</button>
+            <button class="main" id="flash">Прошить по USB</button>
             <div><div class="bar"><i id="prog"></i></div><p id="flashState" class="muted" style="margin-top:8px">Питомец, настройки и подключённый iPhone при обновлении сохраняются.</p></div>
           </div>
           <details class="muted"><summary>Не получается?</summary>
@@ -256,6 +257,19 @@ details p{margin:8px 0 0}
               <code>sudo usermod -aG dialout $USER</code> и перезайди.</p>
             <p>Прошивка не начинается: зажми нижнюю кнопку брелока, коротко нажми верхнюю и отпусти нижнюю. Брелок войдёт
               в режим прошивки; снова нажми «Прошить».</p></details>
+        </div>
+        <div class="card wide">
+          <h3>Обновить по Bluetooth (BLE OTA)</h3>
+          <p class="muted">Без кабеля: передаётся только приложение, настройки и привязка iPhone остаются в NVS.
+            Сначала установи эту версию с поддержкой OTA через USB. Пип должен быть заряжен хотя бы на 50%
+            или подключён к питанию. При сопряжении подтверди цифровой код верхней кнопкой Пипа.</p>
+          <p class="muted">На iPhone открой эту же страницу в <a href="https://bluefy.app/" target="_blank" rel="noopener">Bluefy (Web Bluetooth)</a>.
+            В обычном Safari обновление по BLE без расширения недоступно. Во время передачи не сворачивай браузер.</p>
+          <div class="flashbox">
+            <button class="main" id="bleFlash">Обновить по Bluetooth</button>
+            <div><div class="bar"><i id="bleProg"></i></div>
+              <p class="muted" id="bleFlashState" style="margin-top:8px">USB остаётся резервным способом восстановления.</p></div>
+          </div>
         </div>
       </div>
     </section>
@@ -297,8 +311,9 @@ const FEATS = [
   [4, 'Зарядка = еда', 'на зарядке радуется и наедается'],
   [6, 'Громкие звуки', 'хлопок рядом его пугает'],
 ];
-if (!('serial' in navigator)) $('nobrowser').hidden = false;
-if (!('bluetooth' in navigator)) $('ble').hidden = true;
+if (!('serial' in navigator) && !('bluetooth' in navigator)) $('nobrowser').hidden = false;
+if (!('serial' in navigator)) { $('usb').hidden = true; $('flash').disabled = true; }
+if (!('bluetooth' in navigator)) { $('ble').hidden = true; $('bleFlash').disabled = true; }
 const fw = window.PIP_FIRMWARE;
 $('fwinfo').textContent = fw ? `В панели прошивка ${fw.version} от ${fw.built}.` : 'Файл прошивки не найден (docs/firmware/firmware.js).';
 
@@ -442,6 +457,20 @@ let batRows = null;
 $('batGet').onclick = () => { batRows = []; send('bat'); };
 $('batClear').onclick = () => { if (confirm('Стереть лог батареи на брелоке?')) send('bat clear'); };
 $('devOff').onclick = () => send('dev 0');
+
+/* ---------- application-only BLE OTA: lazy import keeps local USB panel working ---------- */
+$('bleFlash').onclick = async () => {
+  if (!fw) { $('bleFlashState').textContent = 'Нет встроенной прошивки'; return; }
+  $('bleFlash').disabled = true;
+  $('bleProg').style.width = '0%';
+  const report = msg => { $('bleFlashState').textContent = msg; };
+  try {
+    const {flashBleOta} = await import('./ble-ota.js');
+    await flashBleOta(fw, pct => { $('bleProg').style.width = pct + '%'; }, report);
+  } catch (e) {
+    report('Обновление не завершено: ' + (e.message || e) + '. При необходимости прошей по USB.');
+  } finally { $('bleFlash').disabled = false; }
+};
 
 /* ---------- flashing (esptool-js) ---------- */
 $('flash').onclick = async () => {
