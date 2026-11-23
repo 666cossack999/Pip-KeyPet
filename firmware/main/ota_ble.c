@@ -6,7 +6,9 @@
  * 50495044-4f54-412d-4b45-595000000003  Data: write with response, ordered
  * 50495044-4f54-412d-4b45-595000000004  Status: read (10 bytes)
  *
- * BEGIN (0x01) + uint32 LE image size + 32-byte SHA-256
+ * BEGIN (0x01) + uint32 LE image size; HASH_0 (0x05) + first 16 SHA bytes;
+ * HASH_1 (0x06) + last 16 SHA bytes (every command fits MTU 23).
+ * Also accepts a legacy 37-byte BEGIN with embedded hash.
  * FINISH (0x02), ABORT (0x03), REBOOT (0x04)
  * Status: state (0 idle, 1 receiving, 2 ready, 3 error), error code,
  *         received uint32 LE, total uint32 LE.
@@ -54,6 +56,7 @@ static struct {
     uint8_t state, error;
     uint32_t expected, received;
     uint8_t digest[32];
+    uint8_t hash_mask;
     const esp_partition_t *partition;
     esp_ota_handle_t handle;
     bool open;
@@ -117,14 +120,15 @@ static void restart_later(void *arg)
 
 static int begin(uint16_t conn, const uint8_t *buf, uint16_t len)
 {
-    if (len != 37 || buf[0] != 1) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if ((len != 5 && len != 37) || buf[0] != 1) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     if (ota_ble_active()) return BLE_ATT_ERR_UNLIKELY;
     clear_session();
     session.state = 0;
     session.error = 0;
     session.expected = read_le32(buf + 1);
     session.received = 0;
-    memcpy(session.digest, buf + 5, sizeof session.digest);
+    session.hash_mask = 0;
+    if (len == 37) { memcpy(session.digest, buf + 5, 32); session.hash_mask = 3; }
 
     bool charging = false;
     int battery = shell_battery_level(&charging);
@@ -159,7 +163,7 @@ static int begin(uint16_t conn, const uint8_t *buf, uint16_t len)
 
 static int append(uint16_t conn, const uint8_t *data, uint16_t len)
 {
-    if (session.state != OTA_RECEIVING || session.conn != conn || !session.open)
+    if (session.state != OTA_RECEIVING || session.conn != conn || !session.open || session.hash_mask != 3)
         return BLE_ATT_ERR_UNLIKELY;
     if (!len || session.received + (uint32_t)len > session.expected)
         return fail_update(8);
@@ -181,7 +185,7 @@ static int finish(uint16_t conn)
 {
     if (session.conn != conn || session.state != OTA_RECEIVING)
         return BLE_ATT_ERR_UNLIKELY;
-    if (session.received != session.expected) return fail_update(8);
+    if (session.hash_mask != 3 || session.received != session.expected) return fail_update(8);
 
     uint8_t actual[32];
     if (mbedtls_sha256_finish(&session.sha, actual) != 0)
@@ -221,6 +225,16 @@ static int control_access(uint16_t conn, uint16_t attr,
     case 2:
         if (len != 1) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
         return finish(conn);
+    case 5:
+    case 6: {
+        if (len != 17) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+        if (session.conn != conn || session.state != OTA_RECEIVING || session.received)
+            return BLE_ATT_ERR_UNLIKELY;
+        int part = buf[0] == 5 ? 0 : 1;
+        memcpy(session.digest + 16 * part, buf + 1, 16);
+        session.hash_mask |= (uint8_t)(1U << part);
+        return 0;
+    }
     case 3:
         if (len != 1) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
         if (session.conn != OTA_NONE && session.conn != conn) return BLE_ATT_ERR_UNLIKELY;
@@ -278,7 +292,7 @@ static const struct ble_gatt_svc_def ota_services[] = {
          {.uuid = &data_uuid.u, .access_cb = data_access,
           .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN},
          {.uuid = &status_uuid.u, .access_cb = status_access,
-          .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC | BLE_GATT_CHR_F_READ_AUTHEN},
+          .flags = BLE_GATT_CHR_F_READ /* public status: classify OTA peer before pairing */},
          {0}
      }},
     {0}
@@ -299,6 +313,7 @@ void ota_ble_disconnected(uint16_t conn)
         session.error = 0;
     } else {
         session.conn = OTA_NONE; /* verified slot stays selected; manual reset will boot it */
+        session.state = 0; /* don't keep radio awake forever after disconnect */
         release_power();
     }
 }
