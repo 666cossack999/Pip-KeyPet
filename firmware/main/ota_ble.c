@@ -25,6 +25,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "host/ble_hs.h"
+#include "nimble/nimble_port.h"
 #include "mbedtls/sha256.h"
 #include "shell.h"
 #include <string.h>
@@ -64,6 +65,8 @@ static struct {
     esp_pm_lock_handle_t pm_lock;
     bool pm_held;
     esp_timer_handle_t reboot;
+    struct ble_npl_callout watchdog;
+    bool watchdog_ready;
 } session = {.conn = OTA_NONE};
 
 static uint32_t read_le32(const uint8_t *p)
@@ -91,6 +94,7 @@ static void release_power(void)
 
 static void clear_session(void)
 {
+    if (session.watchdog_ready) ble_npl_callout_stop(&session.watchdog);
     if (session.open) {
         esp_ota_abort(session.handle);
         mbedtls_sha256_free(&session.sha);
@@ -110,6 +114,25 @@ static int fail_update(uint8_t error)
     session.error = error;
     session.state = OTA_ERROR;
     return BLE_ATT_ERR_UNLIKELY;
+}
+
+static void kick_watchdog(void)
+{
+    if (session.watchdog_ready)
+        ble_npl_callout_reset(&session.watchdog, ble_npl_time_ms_to_ticks32(90000));
+}
+
+/* The timer runs on the NimBLE host event queue, serialized with GATT writes.
+ * If iOS suspends its browser while BLE stays connected, release the no-sleep
+ * lock and leave the previously-running image intact. */
+static void idle_expired(struct ble_npl_event *ev)
+{
+    (void)ev;
+    if (session.state != OTA_RECEIVING) return;
+    uint16_t conn = session.conn;
+    fail_update(8);
+    if (conn != OTA_NONE)
+        ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
 }
 
 static void restart_later(void *arg)
@@ -156,6 +179,7 @@ static int begin(uint16_t conn, const uint8_t *buf, uint16_t len)
     if (mbedtls_sha256_starts(&session.sha, 0) != 0) return fail_update(4);
     session.conn = conn;
     session.state = OTA_RECEIVING;
+    kick_watchdog();
     ESP_LOGI(TAG, "OTA begin: %lu bytes, slot=%s",
              (unsigned long)session.expected, session.partition->label);
     return 0;
@@ -178,6 +202,7 @@ static int append(uint16_t conn, const uint8_t *data, uint16_t len)
     if (mbedtls_sha256_update(&session.sha, data, len) != 0)
         return fail_update(6);
     session.received += len;
+    kick_watchdog();
     return 0;
 }
 
@@ -205,6 +230,7 @@ static int finish(uint16_t conn)
         ESP_LOGE(TAG, "esp_ota_set_boot_partition: %s", esp_err_to_name(err));
         return fail_update(7);
     }
+    if (session.watchdog_ready) ble_npl_callout_stop(&session.watchdog);
     session.state = OTA_READY;  /* keep BLE and PM awake until REBOOT */
     ESP_LOGI(TAG, "OTA verified, boot slot=%s", session.partition->label);
     return 0;
@@ -300,6 +326,8 @@ static const struct ble_gatt_svc_def ota_services[] = {
 
 void ota_ble_register(void)
 {
+    ble_npl_callout_init(&session.watchdog, nimble_port_get_dflt_eventq(), idle_expired, NULL);
+    session.watchdog_ready = true;
     if (ble_gatts_count_cfg(ota_services) || ble_gatts_add_svcs(ota_services))
         ESP_LOGE(TAG, "BLE OTA service registration failed");
 }
