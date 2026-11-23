@@ -195,3 +195,22 @@ Our `main` is the source of truth; the original repository is an optional source
 - Run `sim/locator_test.c` via `sim/check.py`, `node tools/test-find-my-pip.mjs`,
   and CI's ESP-IDF build before merging. Hardware checks: iPhone Bluefy, desktop USB,
   muted audio, ECO, face-down, screen sleeping, 12-second timeout and manual cancellation.
+
+## Main-to-feature synchronization (required)
+
+- The workflow `.github/workflows/branch-freshness.yml` checks SAME-REPO open PRs
+  against main on every main push, PR change, manual dispatch and weekday schedule.
+  It marks stale branches with `needs-main-sync` and real Git merge conflicts
+  with `main-sync-conflict`, and fails the check for a ready non-draft PR behind main.
+- **Never automatically merge, rebase, reset or force-push main into feature branches.**
+  Perform a controlled `git merge origin/main` only after inspecting the file-level
+  changes and resolving any collisions. Preserve BLE OTA, Find my Pip, the firmware
+  chooser, Bluefy support, and their tests.
+- Synchronize a feature before its final CI/hardware tests and merge. Changing main
+  after hardware testing may require retesting the combined firmware image.
+- Keep upstream (NovikovVisuals) sync separate: never automatically import upstream
+  changes during a main-to-feature sync.
+- After merging a feature PR into main, verify the source branch was removed by the
+  `cleanup-merged-branches.yml` workflow and never delete main itself.
+- GitHub branch protection should make this freshness check required on main to
+  enforce it server-side. Without protection, the workflow is an advisory check.

@@ -17,6 +17,11 @@ if ! command -v idf.py >/dev/null 2>&1; then
     exit 1
 fi
 export KEYPET_PUBLIC=1 # nobody's private extras in it (private/)
+# First resolve the pinned managed BSP, then apply our tiny ES7210 address
+# correction. The upstream BSP assumes 0x40; this board ACKs only at 0x41.
+# Do not edit managed sources by hand: this patch is checked and repeatable.
+(cd firmware && idf.py -B build-release reconfigure >/dev/null)
+python3 tools/patch-es7210-address.py
 (cd firmware && idf.py -B build-release build >/dev/null)
 python3 - <<'EOF'
 import base64, json, os, re, subprocess, time
