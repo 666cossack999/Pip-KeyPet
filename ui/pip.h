@@ -45,6 +45,8 @@ void pip_eco(bool on);                     /* energy saving: fewer frames, the e
 bool pip_eco_on(void);
 bool pip_mic_wanted(void);                 /* Pip listens: the host may switch the microphone off when he does not */
 void pip_wake(void);                       /* something to look at: wake up */
+void pip_locate(bool on);                   /* "Find my Pip": ring and show eyes for <=12 s; off to stop */
+bool pip_locating(void);                  /* remote locator is currently active */
 void pip_wake_up(void);                   /* power-on: eyes open out of black, sleepy, a shake, playful */
 void pip_shake_ok(bool ok);                /* false while an app wants the shakes for itself */
 void pip_battery(int pct, bool charging); /* plugged in he eats and cheers up; under 10% he is tired */
