@@ -154,3 +154,10 @@ Before importing upstream changes:
 Prefer additive, isolated modules and stable interfaces for our enhancements. Avoid hard-coding
 assumptions about upstream code internals when they can be encapsulated behind an adapter.
 Our `main` is the source of truth; the original repository is an optional source of patches.
+
+## Branch lifecycle after merge (required)
+
+- Once a PR has been successfully merged, delete its **source branch in this repository** after confirming the merged PR and the source branch's current head SHA still matches the PR head.
+- Never delete `main`, protected/long-lived environment branches, unmerged branches, or an active draft PR (such as a BLE OTA feature pending hardware testing). Never force-delete a branch that gained new commits after merge.
+- Keep the merged PR and its commit history for audit. The cleanup workflow `.github/workflows/cleanup-merged-branches.yml` automates deletion for future merged PRs, and performs an explicitly reviewed one-time cleanup of historical merged PRs #1 and #2.
+- After any merge, verify that the source branch was deleted; if Actions could not delete it, report the failure rather than claiming success.
