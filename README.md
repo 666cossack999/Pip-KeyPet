@@ -36,8 +36,8 @@ USB остаётся способом восстановления. См. [по�
 ```bash
 git checkout main
 git pull
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.2.0-rc1
+git push origin v1.2.0-rc1
 ```
 
 ## Разработка
