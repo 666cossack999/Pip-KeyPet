@@ -169,7 +169,7 @@ Our `main` is the source of truth; the original repository is an optional source
   Never eval or import a PR firmware.js from an untrusted origin.
 - `tools/build_firmware_catalog.py` builds `firmware/catalog.json` plus same-origin preview
   JSON files from the successful GitHub Actions artifact of the **current PR head SHA**.
-  Previews must come from PRs whose head repository is this repository; skip external forks.
+  Previews must come from PRs whose head repository is this repository and whose changed files\n  include firmware/UI code or device build dependencies; skip external forks and docs-only PRs.
 - Only the trusted `main` workflow `.github/workflows/publish-firmware-catalog.yml`
   may deploy Pages. It downloads CI artifacts as data without executing branch code.
   Do not give deployment credentials to PR build jobs.
