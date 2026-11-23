@@ -31,6 +31,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source "${IDF_PATH}/export.sh"
+          # ESP-IDF image includes an older component manager that cannot resolve
+          # LVGL 9.5 conditional dependencies on an empty build tree.
+          python -m pip install --disable-pip-version-check 'idf-component-manager==2.5.2'
           bash tools/release.sh
           python3 tools/package-release.py
           cp docs/firmware/firmware.js dist/firmware.js
