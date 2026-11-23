@@ -85,6 +85,9 @@ jobs:
       - name: Test firmware catalog builder
         run: python3 -m unittest discover -s tools/tests -p 'test_firmware_catalog.py'
 
+      - name: Check firmware selector UI syntax
+        run: node tools/test-firmware-selector.mjs
+
 
   release:
     name: Publish GitHub Release
