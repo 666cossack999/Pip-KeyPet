@@ -411,6 +411,9 @@ for t in (0, 2):
     ok &= check(f"theme {t}: the phone apps draw with a phone connected (banners over the others)", not bad, bad)
 
 # voice: the synth itself, and Pip speaking through the real paths
+r = subprocess.run([os.path.join(os.path.dirname(sim), "locator_test")], capture_output=True, text=True)
+ok &= check("locator: start/repeat/timeout/cancel (locator_test)", r.returncode == 0, r.stderr.strip())
+
 r = subprocess.run([os.path.join(os.path.dirname(sim), "voice_test")], capture_output=True, text=True)
 ok &= check("voice: 16 sounds audible, ending, pitched right (voice_test)", r.returncode == 0, r.stderr.strip())
 import wave, struct
