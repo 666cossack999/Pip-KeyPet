@@ -270,7 +270,7 @@ details p{margin:8px 0 0}
         </ol>
         <div class="card wide">
           <div class="flashbox">
-            <button class="main" id="flash">Прошить</button>
+            <button class="main" id="flash">Прошить по USB</button>
             <div><div class="bar"><i id="prog"></i></div><p id="flashState" class="muted" style="margin-top:8px">Питомец, настройки и подключённый iPhone при обновлении сохраняются.</p></div>
           </div>
           <details class="muted"><summary>Не получается?</summary>
@@ -278,6 +278,19 @@ details p{margin:8px 0 0}
               <code>sudo usermod -aG dialout $USER</code> и перезайди.</p>
             <p>Прошивка не начинается: зажми нижнюю кнопку брелока, коротко нажми верхнюю и отпусти нижнюю. Брелок войдёт
               в режим прошивки; снова нажми «Прошить».</p></details>
+        </div>
+        <div class="card wide">
+          <h3>Обновить по Bluetooth (BLE OTA)</h3>
+          <p class="muted">Без кабеля: передаётся только приложение, настройки и привязка iPhone остаются в NVS.
+            Сначала установи эту версию с поддержкой OTA через USB. Пип должен быть заряжен хотя бы на 50%
+            или подключён к питанию. При сопряжении подтверди цифровой код верхней кнопкой Пипа.</p>
+          <p class="muted">На iPhone открой эту же страницу в <a href="https://bluefy.app/" target="_blank" rel="noopener">Bluefy (Web Bluetooth)</a>.
+            В обычном Safari обновление по BLE без расширения недоступно. Во время передачи не сворачивай браузер.</p>
+          <div class="flashbox">
+            <button class="main" id="bleFlash">Обновить по Bluetooth</button>
+            <div><div class="bar"><i id="bleProg"></i></div>
+              <p class="muted" id="bleFlashState" style="margin-top:8px">USB остаётся резервным способом восстановления.</p></div>
+          </div>
         </div>
       </div>
     </section>
@@ -327,6 +340,7 @@ $('nobrowser').hidden = hasWebSerial || hasWebBluetooth;
 $('usb').hidden = !hasWebSerial;
 $('ble').hidden = !hasWebBluetooth;
 $('flash').disabled = !hasWebSerial;
+$('bleFlash').disabled = !hasWebBluetooth;
 let fw = window.PIP_FIRMWARE;
 const stableFirmware = fw;
 let uploadedFirmware = null;
@@ -355,6 +369,7 @@ function validateSelectedFirmware(value) {
 function firmwareBusy(value) {
   changingFirmware = value;
   $('flash').disabled = value || !fw || !hasWebSerial;
+  $('bleFlash').disabled = value || !fw || !hasWebBluetooth;
   $('firmwareChoice').disabled = value;
   $('firmwareFile').disabled = value;
 }
@@ -588,6 +603,21 @@ let batRows = null;
 $('batGet').onclick = () => { batRows = []; send('bat'); };
 $('batClear').onclick = () => { if (confirm('Стереть лог батареи на брелоке?')) send('bat clear'); };
 $('devOff').onclick = () => send('dev 0');
+
+/* ---------- application-only BLE OTA: lazy import keeps local USB panel working ---------- */
+$('bleFlash').onclick = async () => {
+  if (!fw || changingFirmware) { $('bleFlashState').textContent = 'Прошивка не выбрана или ещё загружается'; return; }
+  if (firmwareMeta.id === 'stable' && !confirm('Стабильная прошивка без BLE OTA. После отката для следующих обновлений может потребоваться USB. Продолжить?')) return;
+  firmwareBusy(true);
+  $('bleProg').style.width = '0%';
+  const report = msg => { $('bleFlashState').textContent = msg; };
+  try {
+    const {flashBleOta} = await import('./ble-ota.js');
+    await flashBleOta(fw, pct => { $('bleProg').style.width = pct + '%'; }, report);
+  } catch (e) {
+    report('Обновление не завершено: ' + (e.message || e) + '. При необходимости прошей по USB.');
+  } finally { firmwareBusy(false); }
+};
 
 /* ---------- flashing (esptool-js) ---------- */
 $('flash').onclick = async () => {

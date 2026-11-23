@@ -17,6 +17,8 @@
 #include "freertos/semphr.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "esp_ota_ops.h"
+#include "ota_ble.h"
 #include <string.h>
 #include <time.h>
 #include "board.h"
@@ -406,7 +408,7 @@ static void sensors_task(void *arg)
         pip_info_t in;
         pip_get_info(&in);
         panel_want = pip_display_level();
-        bool quiet = pip_eco_on() && !panel_want; /* saving energy: Bluetooth sleeps with the screen */
+        bool quiet = pip_eco_on() && !panel_want && !ota_ble_active(); /* saving energy: Bluetooth sleeps with the screen */
         ui_unlock();
         boot_prev = boot;
         if (quiet != ble_off) ble_off = quiet, ble_quiet(quiet);
@@ -859,4 +861,12 @@ void app_main(void)
     xTaskCreate(audio_task, "audio", 4096, NULL, 6, NULL);
     ble_start();
     debug_start();
+    /* First boot after BLE OTA: only confirm when display, UI, sensors, BLE and
+       debug tasks have initialized. Before this point the bootloader can roll back. */
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t ota_state;
+    if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
+        ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+        ESP_ERROR_CHECK(esp_ota_mark_app_valid_cancel_rollback());
+    }
 }

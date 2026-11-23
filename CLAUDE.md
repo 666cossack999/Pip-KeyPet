@@ -198,3 +198,21 @@ Our `main` is the source of truth; the original repository is an optional source
   `cleanup-merged-branches.yml` workflow and never delete main itself.
 - GitHub branch protection should make this freshness check required on main to
   enforce it server-side. Without protection, the workflow is an advisory check.
+
+## BLE OTA extension (maintained locally, not upstream)
+
+- `firmware/main/ota_ble.{c,h}` is an append-only authenticated BLE OTA GATT service. Register it
+  **after** existing HID/debug services in `ble.c` to preserve the iPhone's cached GATT handles.
+- `docs/ble-ota.js` is imported lazily by `docs/index.html`: keep the USB panel functional
+  when opened as a local file, and preserve the original USB Web Serial recovery route.
+- `docs/BLE_OTA.md` contains the wire protocol, first-install requirement, security caveats
+  and hardware test matrix. A successful build alone does not prove real BLE OTA works.
+- The first BLE OTA update requires a USB-installed bootloader and app supporting OTA; the
+  browser sends only the app image (NOT bootloader, NVS or partition table).
+- Rollback config is in `firmware/sdkconfig.defaults`. Verify that `esp_ota_mark_app_valid_cancel_rollback`
+  is reached after startup and never promise rollback before testing on hardware.
+- Run `node tools/test-ble-ota.mjs` alongside ESP-IDF and `python3 sim/check.py` checks.
+- BLE OTA commands require MITM-protected authenticated pairing, and SHA-256 checks transfer
+  integrity. They do not implement Secure Boot or cryptographic publisher authentication.
+- Keep the OTA module independent of upstream UI and firmware logic, and document impact
+  on it in every upstream-sync PR.

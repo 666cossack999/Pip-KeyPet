@@ -13,6 +13,7 @@
    neither notifications nor music is a computer too, and a computer once seen is known by its address.
    Everything the UI sees goes through phone.h, like the simulator's fake phone. */
 #include "board.h"
+#include "ota_ble.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_random.h"
@@ -652,10 +653,24 @@ static void host_cmd(int what, int dx, int dy) /* from the UI: the remote and th
    A second connection. Who is who: one that writes to the debug service within 4 s of connecting is the debug
    page; otherwise it is the phone (or the phone is already here, so it is the page). */
 static uint16_t dbg_conn = BLE_HS_CONN_HANDLE_NONE, pending = BLE_HS_CONN_HANDLE_NONE;
+static uint16_t ota_conn = BLE_HS_CONN_HANDLE_NONE; /* OTA browser, not an ANCS phone */
 static uint16_t pending2 = BLE_HS_CONN_HANDLE_NONE; /* came while the phone was here: the debug page or a computer */
 static int64_t since[8]; /* when each connection came (handles are small numbers), for the Bluetooth page */
 static struct ble_npl_callout claim;
 static void advertise(void);
+
+/* OTA browser is not an ANCS phone. Only authenticated OTA GATT requests call this. */
+void ble_ota_claim(uint16_t conn)
+{
+    /* Do not let another browser steal the active OTA session's peer role. */
+    if (ota_ble_active() && ota_conn != BLE_HS_CONN_HANDLE_NONE && conn != ota_conn) return;
+    if (conn == pending) {
+        ble_npl_callout_stop(&claim);
+        pending = BLE_HS_CONN_HANDLE_NONE;
+    }
+    if (conn == pending2) pending2 = BLE_HS_CONN_HANDLE_NONE;
+    ota_conn = conn;
+}
 
 static void phone_take(uint16_t conn)
 {
@@ -800,7 +815,17 @@ static int gap_event(struct ble_gap_event *e, void *arg)
         ble_npl_callout_reset(&claim, ble_npl_time_ms_to_ticks32(4000));
         advertise();
         break;
-    case BLE_GAP_EVENT_DISCONNECT:
+    case BLE_GAP_EVENT_DISCONNECT: {
+        uint16_t dc = e->disconnect.conn.conn_handle;
+        bool ota_peer = dc == ota_conn;
+        ota_ble_disconnected(dc);
+        if (ota_peer) {
+            ota_conn = BLE_HS_CONN_HANDLE_NONE;
+            if (dc != dbg_conn && dc != b.conn && dc != host_conn && dc != pending && dc != pending2) {
+                advertise();
+                break;
+            }
+        }
         if (e->disconnect.conn.conn_handle == dbg_conn) {
             dbg_conn = BLE_HS_CONN_HANDLE_NONE;
             ESP_LOGI(TAG, "debug page left");
@@ -821,6 +846,7 @@ static int gap_event(struct ble_gap_event *e, void *arg)
         ui(ui_link_off, NULL);
         advertise();
         break;
+    }
     case BLE_GAP_EVENT_PASSKEY_ACTION: {
         bool computer = e->passkey.conn_handle == pending2 || kind_of(e->passkey.conn_handle) > 1;
         if (computer) as_computer(e->passkey.conn_handle);
@@ -840,6 +866,7 @@ static int gap_event(struct ble_gap_event *e, void *arg)
     }
     case BLE_GAP_EVENT_ENC_CHANGE: {
         uint16_t c = e->enc_change.conn_handle;
+        if (c == ota_conn) break; /* OTA peer, not a computer/iPhone */
         if (c == host_conn) break; /* the computer again */
         if (e->enc_change.status) {
             ESP_LOGI(TAG, "encryption failed");
@@ -925,7 +952,8 @@ void ble_quiet(bool q)
     quiet = q;
     if (!q) { advertise(); ESP_LOGI(TAG, "awake: advertising again"); return; }
     ble_gap_adv_stop();
-    const uint16_t cs[] = {b.conn, host_conn, dbg_conn, pending, pending2}; /* the iPhone reconnects by itself when we are back */
+    if (ota_ble_active()) { quiet = false; return; } /* ongoing OTA keeps BLE alive */
+    const uint16_t cs[] = {b.conn, host_conn, dbg_conn, ota_conn, pending, pending2}; /* the iPhone reconnects by itself when we are back */
     for (unsigned i = 0; i < sizeof cs / sizeof cs[0]; i++)
         if (cs[i] != BLE_HS_CONN_HANDLE_NONE) ble_gap_terminate(cs[i], BLE_ERR_REM_USER_CONN_TERM);
     ESP_LOGI(TAG, "asleep: Bluetooth off the air");
@@ -950,7 +978,7 @@ static void advertise(void)
 
 /* Bump when the services table changes: phones and computers bonded to the old one are told once (Service Changed, on
    their next connection) to look at our services again instead of trusting the handles they cached. */
-#define GATT_LAYOUT 2 /* 2: the computer's service gained the keyboard and media reports */
+#define GATT_LAYOUT 3 /* 3: appended authenticated BLE OTA service */
 
 static void gatt_layout_check(void)
 {
@@ -1008,6 +1036,7 @@ void ble_start(void)
     ble_svc_gap_device_name_set("Pip");
     ble_svc_gap_device_appearance_set(0x03C1); /* keyboard */
     if (ble_gatts_count_cfg(services) || ble_gatts_add_svcs(services)) ESP_LOGE(TAG, "HID services did not register");
+    ota_ble_register(); /* append only: preserve iPhone's cached handles */
     ble_store_config_init(); /* bonds in NVS: pair once */
     phone_on_command(command);
     phone_on_bt(bt_query, bt_act);

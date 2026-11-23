@@ -91,6 +91,12 @@ jobs:
       - name: Test main branch freshness monitor
         run: node tools/test-branch-freshness.mjs
 
+      - name: Test BLE OTA browser protocol
+        run: node tools/test-ble-ota.mjs
+
+      - name: Check BLE OTA and firmware selector integration
+        run: node tools/test-ota-selector-integration.mjs
+
 
 
   catalog_check:
