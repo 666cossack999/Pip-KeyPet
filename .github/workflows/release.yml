@@ -91,6 +91,9 @@ jobs:
       - name: Test Find my Pip web commands
         run: node tools/test-find-my-pip.mjs
 
+      - name: Test WebSerial reconnect after ESP32-S3 USB reset
+        run: node tools/test-webserial-reconnect.mjs
+
       - name: Test main branch freshness monitor
         run: node tools/test-branch-freshness.mjs
 
