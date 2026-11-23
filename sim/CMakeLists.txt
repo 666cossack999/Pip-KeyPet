@@ -8,7 +8,7 @@ set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 add_subdirectory(../third_party/lvgl lvgl)
 
 file(GLOB THEME_FONTS ../ui/fonts/font_*_*.c)
-set(UI ../ui/face.c ../ui/imu.c ../ui/pip.c ../ui/doodle.c ../ui/pet.c ../ui/shell.c ../ui/apps.c ../ui/voice.c ../ui/profile.c
+set(UI ../ui/face.c ../ui/imu.c ../ui/pip.c ../ui/locator.c ../ui/doodle.c ../ui/pet.c ../ui/shell.c ../ui/apps.c ../ui/voice.c ../ui/profile.c
        ../ui/theme.c ../ui/phone.c ../ui/mic.c ../ui/maze.c ${THEME_FONTS})
 
 # the owner's own extras, kept out of the public repo (private/ is gitignored): the AITU mark on the badge
@@ -30,6 +30,8 @@ else()
     add_executable(face_test face_test.c ../ui/face.c)
     target_include_directories(face_test PRIVATE ../ui)
     target_link_libraries(face_test PRIVATE m)
+    add_executable(locator_test locator_test.c ../ui/locator.c)
+    target_include_directories(locator_test PRIVATE ../ui)
     add_executable(voice_test voice_test.c ../ui/voice.c)
     target_include_directories(voice_test PRIVATE ../ui)
     target_link_libraries(voice_test PRIVATE m)

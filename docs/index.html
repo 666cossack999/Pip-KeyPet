@@ -236,6 +236,19 @@ details p{margin:8px 0 0}
           <h3>Что Пип замечает</h3>
           <div class="toggles" id="feats"></div>
         </div>
+        <div class="card wide">
+          <h3>Найти Пипа</h3>
+          <p class="muted">Потерял брелок дома? Подключись по Bluetooth или USB и позови его:
+            Пип проснётся, удивится и споёт мелодию несколько раз в течение 12 секунд.
+            Можно остановить с этой страницы или прикоснувшись к брелоку.</p>
+          <div class="row">
+            <button class="main" id="locateStart" disabled>Позвать Пипа</button>
+            <button id="locateStop" disabled>Остановить</button>
+            <span id="locateStatus" class="muted" role="status" aria-live="polite">Подключи Пипа для поиска.</span>
+          </div>
+          <p class="muted">Для звука должна быть включена настройка «Звук» на брелоке.
+            Функция доступна только в прошивке с поддержкой поиска; работает в пределах Bluetooth-соединения.</p>
+        </div>
       </div>
     </section>
 
@@ -523,16 +536,19 @@ function onLine(l) {
     const s = JSON.parse(l.slice(3));
     $('mood').textContent = s.m;
     $('bat').textContent = s.bat >= 0 ? `${s.bat}%${s.ch ? ' · заряжается' : ''}` : '—';
+    if (typeof s.locating === 'number') updateLocateState(s.locating !== 0);
   } else if (l.startsWith('@C ')) {
     cfg = JSON.parse(l.slice(3));
     fill();
+    syncLocatorUi();
     if (port && usbWanted) {
       if (usbAskTimer !== null) clearInterval(usbAskTimer), usbAskTimer = null;
-      usbReopens = 0; // the real application answered, not just Windows enumerating
+      usbReopens = 0;
       usbRecoveryStart = Date.now();
       state('По кабелю', true);
     }
   }
+  else if (l.startsWith('@F ')) { updateLocateState(l.trim() === '@F 1'); }
   else if (l.startsWith('@B ') && batRows) {
     if (l === '@B end') {
       const csv = 'seq,uptime_s,mv,percent,charging,usb,eco,screen_lit_percent\n' + batRows.map(r => {
@@ -644,7 +660,58 @@ async function closePort() {
   try { await p.close(); } catch (e) {}
   return p;
 }
-function state(text, on) { $('state').textContent = text; document.body.classList.toggle('linked', on); }
+function state(text, on) {
+  $('state').textContent = text;
+  document.body.classList.toggle('linked', on);
+  if (!on) locateActive = false;
+  syncLocatorUi();
+}
+let locateActive = false;
+let locatePending = false;
+function syncLocatorUi() {
+  const available = Boolean((port || ble) && cfg?.locate === 1);
+  $('locateStart').disabled = !available || locateActive || locatePending;
+  $('locateStop').disabled = !available || !locateActive || locatePending;
+  if (!available) {
+    $('locateStatus').textContent = (port || ble) ?
+      'Требуется прошивка с поддержкой «Найти Пипа».' :
+      'Подключи Пипа для поиска.';
+  } else if (!locatePending) {
+    $('locateStatus').textContent = locateActive ?
+      'Пип подаёт сигнал. Нажми «Остановить» или коснись брелока.' :
+      'Готов к поиску.';
+  }
+}
+function updateLocateState(active) {
+  locateActive = active;
+  locatePending = false;
+  syncLocatorUi();
+}
+async function locateCommand(active) {
+  if (!(port || ble) || cfg?.locate !== 1 || locatePending) return;
+  locatePending = true;
+  $('locateStatus').textContent = active ? 'Вызываю Пипа...' : 'Останавливаю сигнал...';
+  syncLocatorUi();
+  try {
+    await send(active ? 'locate 1' : 'locate 0');
+    // The device acknowledges with @F and sends the current state in @S every second.
+    // If an old/unstable link never answers, do not claim it is ringing.
+    setTimeout(() => {
+      if (locatePending) {
+        locatePending = false;
+        $('locateStatus').textContent = 'Пип не подтвердил команду. Проверь Bluetooth/USB.';
+        $('locateStart').disabled = !(port || ble) || cfg?.locate !== 1 || locateActive;
+        $('locateStop').disabled = !locateActive;
+      }
+    }, 5000);
+  } catch (e) {
+    locatePending = false;
+    syncLocatorUi();
+    $('locateStatus').textContent = 'Ошибка команды: ' + (e.message || e);
+  }
+}
+$('locateStart').onclick = () => locateCommand(true);
+$('locateStop').onclick = () => locateCommand(false);
 $('usb').onclick = async () => {
   try {
     await closePort();
