@@ -85,9 +85,13 @@ async function scenario({mtu = 160, batteryError = false, flashError = false} = 
     async getPrimaryService(uuid){assert.equal(uuid,mod.OTA_UUID);return svc;}
   };
   const device = {gatt};
-  globalThis.navigator = {bluetooth: {
+  const bluetooth = {
     async requestDevice(x){assert.deepEqual(x.optionalServices,[mod.OTA_UUID]);return device;}
-  }};
+  };
+  if (globalThis.navigator)
+    Object.defineProperty(globalThis.navigator, 'bluetooth', {value: bluetooth, configurable: true});
+  else
+    Object.defineProperty(globalThis, 'navigator', {value: {bluetooth}, configurable: true});
   const progress=[];
   let failure=null;
   try {await mod.flashBleOta(release(packet),x=>progress.push(x));}
