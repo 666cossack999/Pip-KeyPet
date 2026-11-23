@@ -288,6 +288,7 @@ static void command(char *line)
     else if (!strcmp(c, "btn") && n > 1) shell_button((int)a1), shell_button_up((int)a1); /* a press, let go at once */
     else if (!strcmp(c, "meet")) pip_meet();
     else if (!strcmp(c, "locate") && n > 1) {
+        if (a1 != 0) shell_home(); /* face must be visible even if an app was open */
         pip_locate(a1 != 0);
         locator_command = pip_locating() ? 1 : 0;
     }
