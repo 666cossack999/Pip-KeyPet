@@ -179,3 +179,19 @@ Our `main` is the source of truth; the original repository is an optional source
   the BLE OTA button should use the same selected firmware object.
 - Run `python3 -m unittest discover -s tools/tests -p test_firmware_catalog.py` and
   `node tools/test-firmware-selector.mjs` when changing the release pipeline or selector.
+
+## Find my Pip (optional locator)
+
+- `ui/locator.{c,h}` provides a pure, non-persistent 12-second alarm timer, used by `ui/pip.c`.
+  The melody is the existing `VOICE_ALARM`; respect `PIP_F_VOICE` (mute), no new sound assets,
+  no NVS writes and no new ESP-IDF background task.
+- `firmware/main/debug.c` exposes `locate 1` / `locate 0` and `@F 1/0`
+  acknowledgment on the existing USB/BLE debug link. `@C` includes `locate:1`
+  as a capability; `@S` includes `locating` so the browser knows when auto-stop occurs.
+- The page enables locator controls only if connected to a firmware that advertises this
+  capability; old firmware must not show false success.
+- When merging BLE OTA PR #3 or future upstream changes, preserve the locator card
+  in `docs/index.html` and avoid changing existing debug GATT handles.
+- Run `sim/locator_test.c` via `sim/check.py`, `node tools/test-find-my-pip.mjs`,
+  and CI's ESP-IDF build before merging. Hardware checks: iPhone Bluefy, desktop USB,
+  muted audio, ECO, face-down, screen sleeping, 12-second timeout and manual cancellation.
