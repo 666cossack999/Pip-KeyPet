@@ -51,16 +51,19 @@ async function run({behind, draft=false, dirty=false, oldLabel=false, eventName=
   await execute(context,github,core);
   return events;
 }
-const staleDraft=await run({behind:7,draft:true,dirty:true});
+const staleDraft=await run({behind:7,draft:true,dirty:true,eventName:'push'});
 assert.ok(staleDraft.includes('add:needs-main-sync'));
 assert.ok(staleDraft.includes('add:main-sync-conflict'));
 assert.ok(!staleDraft.some(e=>e.startsWith('fail:')));
 const staleReady=await run({behind:7,draft:false});
 assert.ok(staleReady.some(e=>e.startsWith('fail:')));
-const fresh=await run({behind:0,oldLabel:true});
+const fresh=await run({behind:0,oldLabel:true,eventName:'push'});
 assert.ok(fresh.includes('remove:needs-main-sync'));
 assert.ok(!fresh.some(e=>e.startsWith('fail:')));
 const push=await run({behind:7,eventName:'push'});
 assert.ok(push.includes('add:needs-main-sync'));
 assert.ok(!push.some(e=>e.startsWith('fail:')));
+const readOnlyPR=await run({behind:7,draft:true,eventName:'pull_request'});
+assert.ok(!readOnlyPR.some(e=>e.startsWith('add:') || e.startsWith('remove:') || e.startsWith('create-label')));
+assert.ok(!readOnlyPR.some(e=>e.startsWith('fail:')));
 console.log('ok: branch freshness workflow, draft/ready, conflict, restored freshness, no mutations of refs');
