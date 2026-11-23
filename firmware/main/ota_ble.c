@@ -16,7 +16,7 @@
  * Writes are acknowledged only after esp_ota_write succeeds. SHA-256 validates
  * transfer integrity; firmware authenticity additionally requires Secure Boot,
  * which is NOT enabled by this feature. An authenticated, MITM-protected BLE
- * bond is mandatory for all OTA GATT characteristics.
+ * bond is mandatory for control/data writes; status reads are public.
  */
 #include "ota_ble.h"
 #include "esp_log.h"
