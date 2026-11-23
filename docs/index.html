@@ -65,6 +65,7 @@ button:hover{border-color:var(--dim)}
 button.main{background:var(--acc);border-color:var(--acc);color:#000}
 button.main:hover{filter:brightness(1.08)}
 button:disabled{opacity:.45;cursor:default}
+[hidden]{display:none!important}
 :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 label,.lbl{display:block;font-size:13px;color:var(--dim);margin:0 0 4px}
@@ -153,13 +154,16 @@ details p{margin:8px 0 0}
       <button data-tab="dev">Для разработчиков</button>
     </nav>
 
-    <footer>Работает в Chrome и Edge. Ничего не устанавливается: страница говорит с брелоком прямо из браузера.
+    <footer>По USB — Chrome/Edge на компьютере. По Bluetooth — совместимый браузер, например Bluefy на iPhone.
       <a href="https://github.com/666cossack999/Pip-KeyPet" target="_blank" rel="noopener">Исходный код</a></footer>
   </aside>
 
   <main>
     <div class="notice" id="nobrowser" hidden>
-      Этот браузер не умеет работать с брелоком. Открой эту страницу в <b>Google Chrome</b> или <b>Microsoft Edge</b> на компьютере.
+      В этом браузере недоступны ни USB (Web Serial), ни Bluetooth (Web Bluetooth).
+      Для USB открой страницу в <b>Chrome/Edge на компьютере</b>.
+      Для Bluetooth на iPhone используй <a href="https://bluefy.app/" target="_blank" rel="noopener">Bluefy</a>.
+      В обычном Safari Web Bluetooth недоступен.
     </div>
 
     <section data-tab="settings">
@@ -315,8 +319,14 @@ const FEATS = [
   [4, 'Зарядка = еда', 'на зарядке радуется и наедается'],
   [6, 'Громкие звуки', 'хлопок рядом его пугает'],
 ];
-if (!('serial' in navigator)) $('nobrowser').hidden = false;
-if (!('bluetooth' in navigator)) $('ble').hidden = true;
+// Bluefy on iPhone supports Web Bluetooth but not Web Serial.
+ // Missing USB alone is NOT an unsupported-browser error.
+const hasWebSerial = typeof navigator.serial?.requestPort === 'function';
+const hasWebBluetooth = typeof navigator.bluetooth?.requestDevice === 'function';
+$('nobrowser').hidden = hasWebSerial || hasWebBluetooth;
+$('usb').hidden = !hasWebSerial;
+$('ble').hidden = !hasWebBluetooth;
+$('flash').disabled = !hasWebSerial;
 let fw = window.PIP_FIRMWARE;
 const stableFirmware = fw;
 let uploadedFirmware = null;
@@ -344,7 +354,7 @@ function validateSelectedFirmware(value) {
 }
 function firmwareBusy(value) {
   changingFirmware = value;
-  $('flash').disabled = value || !fw || !('serial' in navigator);
+  $('flash').disabled = value || !fw || !hasWebSerial;
   $('firmwareChoice').disabled = value;
   $('firmwareFile').disabled = value;
 }
