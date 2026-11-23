@@ -102,6 +102,7 @@ async function simulate({resetsOnOpen = 1} = {}) {
   b.eval('onLine(\'@C {"ver":"normal","feat":[]}\')');
   assert.equal(b.elements.state.textContent,'По кабелю');
   const closing=b.eval('closePort()');
+  await Promise.resolve(); // allow async reader.cancel() to finish and arm close delay
   assert.ok(await b.tick(), 'closePort awaits its internal delay');
   await closing;
   assert.equal(b.closes,1);
