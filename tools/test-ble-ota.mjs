@@ -1,8 +1,6 @@
 // No hardware required: exercise the exact browser-side BLE OTA protocol.
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {webcrypto} from 'node:crypto';
-globalThis.crypto = webcrypto;
 
 const js = readFileSync('docs/ble-ota.js', 'utf8');
 const mod = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
