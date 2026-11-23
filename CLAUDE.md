@@ -126,3 +126,31 @@ what was on screen (`pip_frame_worst`; also `fw` in `@S`) — check it after vis
   adding reactions/apps (`app_ids` list).
 - Commit messages in Russian, summary line + short bullet list.
 - macOS `seq 1 0` counts down — careful in shell loops building event strings.
+
+## Upstream synchronization policy (required for this fork)
+
+This fork is maintained independently from `NovikovVisuals/Pip-KeyPet`. Never use GitHub's
+**Sync fork** to merge upstream directly into `main`, and never auto-merge upstream commits.
+
+Before importing upstream changes:
+1. Compare `NovikovVisuals:main` with our `main`, record the upstream commit SHA(s), and
+   **report the actual changes to the owner before merging** (features, fixes, affected files,
+   breaking changes, conflicts and risks). Get the owner's go-ahead for the merge.
+2. Create a separate `upstream/sync-*` branch based on our `main`. Import only reviewed
+   upstream changes; prefer selective cherry-picks or adapted patches if a full merge would
+   overwrite our improvements. Do not rewrite our history.
+3. Map changed upstream files against our custom work: `docs/index.html`,
+   `tools/release.sh`, `tools/package-release.py`, `.github/workflows/release.yml`,
+   `AGENTS.md`, `CLAUDE.md`, and every independently modified firmware/UI module.
+4. If upstream changes touch a behavior we customized, fix integration in the sync branch,
+   add regression coverage and document the resolution in its PR **before** merging.
+5. Require CI: ESP-IDF firmware build + web-flasher payload validation and the complete
+   headless simulator smoke suite (`python3 sim/check.py`). For features CI cannot emulate,
+   record the required real-device checks (screen, touch, IMU, BLE pairing/notifications,
+   settings persistence/NVS, USB web flashing and power management) in the PR.
+6. Preserve original MIT copyright notices and third-party licenses. Maintain `AGENTS.md`
+   and `CLAUDE.md` in sync whenever development rules change.
+
+Prefer additive, isolated modules and stable interfaces for our enhancements. Avoid hard-coding
+assumptions about upstream code internals when they can be encapsulated behind an adapter.
+Our `main` is the source of truth; the original repository is an optional source of patches.
