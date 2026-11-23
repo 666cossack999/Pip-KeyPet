@@ -151,6 +151,15 @@ def build_catalog(api: Github, site: Path, max_previews: int = 10):
             break
         if (pr.get("head", {}).get("repo") or {}).get("full_name") != api.repo:
             continue  # never publish a build of a third-party fork as a trusted preview
+        changed_files = api.get(f"pulls/{pr['number']}/files?per_page=100")
+        relevant = any(
+            file.get("filename", "").startswith(("firmware/", "ui/", "third_party/"))
+            or file.get("filename") in (".gitmodules", "tools/release.sh")
+            for file in changed_files
+        )
+        if not relevant:
+            print(f"Skip PR #{pr['number']}: no firmware/UI source changes")
+            continue
         head = pr["head"]
         run = api.successful_run(head["ref"], head["sha"])
         if not run:
