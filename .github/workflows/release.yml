@@ -1,0 +1,103 @@
+name: Build firmware, web flasher and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pip-keypet-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: ESP-IDF 5.5 + web firmware
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.5
+    steps:
+      - name: Checkout with LVGL submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build web-flash image
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/release.sh
+          python3 tools/package-release.py
+          cp docs/firmware/firmware.js dist/firmware.js
+
+      - name: Check release tag against firmware version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/.*set(PROJECT_VER "\([^"]*\)").*/\1/p' firmware/CMakeLists.txt)
+          test "v${VERSION}" = "${GITHUB_REF_NAME}" || {
+            echo "Tag ${GITHUB_REF_NAME} does not match firmware version v${VERSION}" >&2
+            exit 1
+          }
+
+      - name: Upload release archives for download and CI validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-keypet-firmware
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload site for GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs
+
+  pages:
+    name: Publish web flasher
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          name: pip-keypet-firmware
+          path: dist
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" dist/*.zip dist/firmware.js \
+            --title "Pip-KeyPet ${GITHUB_REF_NAME}" \
+            --notes "Flash in Chrome/Edge: https://${GITHUB_REPOSITORY_OWNER}.github.io/Pip-KeyPet/\n\nOffline web panel and address-aware flash images are attached." \
+            --verify-tag
