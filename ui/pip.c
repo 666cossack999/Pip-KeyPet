@@ -2,6 +2,7 @@
 #include "face.h"
 #include "imu.h"
 #include "mic.h"
+#include "locator.h"
 #include "theme.h"
 #include <stdio.h>
 #include "doodle.h"
@@ -192,6 +193,7 @@ static struct {
     float fx, fy, path, frame_ms;
     uint32_t last_tick, press_tick, last_draw;
     bool eco;
+    pip_locator_t locator; /* non-persistent remote locator; no extra task */
 } s = {.bat_pct = -1, .intro = -1, .last_bang = -10}; /* the battery is unknown until the power chip says */
 
 static float frand(float a, float b) { return a + (b - a) * (float)lv_rand(0, 10000) / 10000.0f; }
@@ -251,7 +253,7 @@ static void react(int mood, float secs, const char *name)
     s.react_name = name;
     if (!fresh) return; /* petting refreshes the same reaction every frame */
     static const struct { const char *name; int sound; } said[] = {
-        {"yum", VOICE_NOM}, {"charging", VOICE_NOM}, {"blown", VOICE_OH}, {"too full", VOICE_BURP}, {"dislikes you", VOICE_HMPH}, {"time's up", VOICE_ALARM},
+        {"locator", VOICE_ALARM}, {"yum", VOICE_NOM}, {"charging", VOICE_NOM}, {"blown", VOICE_OH}, {"too full", VOICE_BURP}, {"dislikes you", VOICE_HMPH}, {"time's up", VOICE_ALARM},
         {"fed up", VOICE_GROWL}, {"pet", VOICE_PURR}, {"meet", VOICE_HM}, {"face down", VOICE_YAWN}, {"won", VOICE_HAPPY}, {"lost", VOICE_SAD},
     };
     for (unsigned i = 0; i < sizeof said / sizeof said[0]; i++)
@@ -357,8 +359,26 @@ static void light_up(void)
     s.dark_in = s.imu.face_down && FEAT(PIP_F_FACEDOWN) ? DARK_AGAIN_S : 0;
 }
 
+void pip_locate(bool on)
+{
+    if (!on) {
+        pip_locator_stop(&s.locator);
+        if (s.react_name && !strcmp(s.react_name, "locator")) s.react_left = 0;
+        return;
+    }
+    pip_locator_start(&s.locator);
+    light_up();
+    react(PIP_SURPRISED, PIP_LOCATE_DURATION_S, "locator");
+    /* Repeated requests also chirp, even when the reaction is already active. */
+    if (s.react_name && !strcmp(s.react_name, "locator") && s.react_left > 0)
+        say(VOICE_ALARM);
+}
+
+bool pip_locating(void) { return pip_locator_active(&s.locator); }
+
 void pip_seen(void)
 {
+    if (pip_locating()) { pip_locate(false); light_up(); return; }
     light_up();
     int r = pet_event(&s.pet, PET_SEEN); /* back after hours alone: glad, or sulking if he felt left */
     if (r >= 0) react(r, 3.0f, r == PIP_HURT ? "sulks" : "glad you're back"), s.greet_t = 1.2f;
@@ -586,6 +606,11 @@ static void power(float dt)
 
 static void update(float dt)
 {
+    if (pip_locating()) {
+        if (pip_locator_step(&s.locator, dt)) say(VOICE_ALARM);
+        if (pip_locating()) light_up(); /* keep face visible through power saving */
+        else if (s.react_name && !strcmp(s.react_name, "locator")) s.react_left = 0;
+    }
     power(dt);
     /* reactions */
     s.annoy = fmaxf(0, s.annoy - dt * 0.4f);
