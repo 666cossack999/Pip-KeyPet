@@ -48,6 +48,25 @@ jobs:
         with:
           path: docs
 
+      # upload-pages-artifact can complete before the Actions artifacts API
+      # makes its new entry visible to deploy-pages (seen in runs #26/#27).
+      - name: Wait until Pages artifact is discoverable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" --jq '[.artifacts[] | select(.name == "github-pages" and .expired == false)] | length' || true)"
+            if [[ "$count" =~ ^[0-9]+$ ]] && (( count > 0 )); then
+              echo "Pages artifact visible via Actions API (attempt $attempt, matches $count)."
+              exit 0
+            fi
+            echo "Pages artifact not yet visible (attempt $attempt/12); waiting 10 seconds..."
+            sleep 10
+          done
+          echo "::error::github-pages artifact not visible through Actions API after 120 seconds; check Actions artifact access and status."
+          exit 1
+
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
