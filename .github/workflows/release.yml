@@ -99,5 +99,5 @@ jobs:
           set -euo pipefail
           gh release create "${GITHUB_REF_NAME}" dist/*.zip dist/firmware.js \
             --title "Pip-KeyPet ${GITHUB_REF_NAME}" \
-            --notes "Flash in Chrome/Edge: https://${GITHUB_REPOSITORY_OWNER}.github.io/Pip-KeyPet/\n\nOffline web panel and address-aware flash images are attached." \
+            --notes "Flash in Chrome/Edge: https://${GITHUB_REPOSITORY_OWNER}.github.io/Pip-KeyPet/\n\nLocal web panel and address-aware flash images are attached (internet may be required for esptool-js)." \
             --verify-tag
