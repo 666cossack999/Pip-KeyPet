@@ -188,7 +188,8 @@ $('usb').onclick = async () => {
   try {
     usb = await navigator.serial.requestPort({filters: [{usbVendorId: 0x303a}]});
     await usb.open({baudRate: 115200});
-    try { await usb.setSignals({dataTerminalReady: false, requestToSend: false}); } catch (e) {}
+    // Do not force DTR/RTS in debug sessions: the native ESP32-S3
+    // USB Serial/JTAG may reset on a transient RTS=1 / DTR=0 combination.
     $('via').textContent = 'USB';
     (async () => {
       const dec = new TextDecoder(), r = usb.readable.getReader();

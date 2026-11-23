@@ -450,9 +450,71 @@ void listFirmwareVersions();
 
 /* ---------- the link: a USB serial port (Web Serial) or Bluetooth ---------- */
 let port = null, reader = null, ble = null, bleq = Promise.resolve(), alive = 0, cfg = null;
+// ESP32-S3's built-in USB Serial/JTAG can re-enumerate when CDC control
+// signals are changed. Recover only explicitly requested USB connections.
+let usbWanted = false, usbGeneration = 0, usbReopens = 0, usbConnecting = false;
+let usbAskTimer = null, usbRetryTimer = null, usbRecoveryStart = 0, usbPortInfo = null;
+const USB_MAX_REOPENS = 2, USB_RECOVERY_MS = 18000;
+function clearUsbTimers() {
+  if (usbAskTimer !== null) clearInterval(usbAskTimer), usbAskTimer = null;
+  if (usbRetryTimer !== null) clearTimeout(usbRetryTimer), usbRetryTimer = null;
+}
+function usbFailure(message) {
+  usbWanted = false;
+  clearUsbTimers();
+  state(message, false);
+}
+function scheduleUsbRecovery(delay = 1000) {
+  if (!usbWanted || port || usbRetryTimer !== null) return;
+  usbRetryTimer = setTimeout(async () => {
+    usbRetryTimer = null;
+    if (!usbWanted || port || usbConnecting) return;
+    if (Date.now() - usbRecoveryStart >= USB_RECOVERY_MS || usbReopens >= USB_MAX_REOPENS) {
+      usbFailure('USB не переподключился. Выбери порт ещё раз или воспользуйся Bluetooth.');
+      return;
+    }
+    try {
+      // getPorts() requires no new gesture: only previously authorised ports.
+      const ports = await navigator.serial.getPorts();
+      if (!usbWanted || port) return; // manual close while getPorts was pending
+      const matches = ports.filter(x => {
+        const info = x.getInfo?.();
+        return info?.usbVendorId === usbPortInfo?.usbVendorId &&
+               info?.usbProductId === usbPortInfo?.usbProductId;
+      });
+      if (matches.length > 1) {
+        usbFailure('Найдено несколько одинаковых USB-устройств — выбери порт вручную.');
+      } else if (matches.length === 1) {
+        usbReopens++;
+        await openPort(matches[0], true);
+      } else scheduleUsbRecovery(1200); // waiting for Windows to re-enumerate COM
+    } catch (e) { scheduleUsbRecovery(1500); }
+  }, delay);
+}
+if (hasWebSerial && typeof navigator.serial.addEventListener === 'function') {
+  navigator.serial.addEventListener('connect', () => {
+    if (usbWanted && !port) scheduleUsbRecovery(300);
+  });
+  // The reader also detects disconnect; this catches it even when read() is hung.
+  navigator.serial.addEventListener('disconnect', e => {
+    if (usbWanted && port && e.port === port) {
+      port = null;
+      cfg = null;
+      alive = 0;
+      state('USB перезапустился — восстанавливаю соединение...', false);
+      if (usbAskTimer !== null) clearInterval(usbAskTimer), usbAskTimer = null;
+      if (reader) void reader.cancel().catch(() => {});
+      scheduleUsbRecovery(1200);
+    }
+  });
+}
 const enc = new TextEncoder();
 async function send(c) {
-  if (port && port.writable) { const w = port.writable.getWriter(); await w.write(enc.encode(c + '\n')); w.releaseLock(); }
+  if (port && port.writable) {
+    const w = port.writable.getWriter();
+    try { await w.write(enc.encode(c + '\n')); }
+    finally { w.releaseLock(); }
+  }
   else if (ble) { bleq = bleq.then(() => ble.writeValueWithoutResponse(enc.encode(c + '\n'))).catch(() => {}); return bleq; }
 }
 function onLine(l) {
@@ -461,7 +523,16 @@ function onLine(l) {
     const s = JSON.parse(l.slice(3));
     $('mood').textContent = s.m;
     $('bat').textContent = s.bat >= 0 ? `${s.bat}%${s.ch ? ' · заряжается' : ''}` : '—';
-  } else if (l.startsWith('@C ')) { cfg = JSON.parse(l.slice(3)); fill(); }
+  } else if (l.startsWith('@C ')) {
+    cfg = JSON.parse(l.slice(3));
+    fill();
+    if (port && usbWanted) {
+      if (usbAskTimer !== null) clearInterval(usbAskTimer), usbAskTimer = null;
+      usbReopens = 0; // the real application answered, not just Windows enumerating
+      usbRecoveryStart = Date.now();
+      state('По кабелю', true);
+    }
+  }
   else if (l.startsWith('@B ') && batRows) {
     if (l === '@B end') {
       const csv = 'seq,uptime_s,mv,percent,charging,usb,eco,screen_lit_percent\n' + batRows.map(r => {
@@ -475,38 +546,99 @@ function onLine(l) {
     } else batRows.push(l.slice(3));
   }
 }
-async function readLoop() {
+async function readLoop(p, generation) {
   const dec = new TextDecoder();
-  let acc = '';
+  let acc = '', currentReader = null;
   try {
-    while (port && port.readable) {
-      reader = port.readable.getReader();
-      for (;;) {
-        const {value, done} = await reader.read();
-        if (done) break;
-        acc += dec.decode(value, {stream: true});
-        let i;
-        while ((i = acc.indexOf('\n')) >= 0) { onLine(acc.slice(0, i).replace(/\r$/, '')); acc = acc.slice(i + 1); }
+    while (usbWanted && port === p && p.readable) {
+      currentReader = p.readable.getReader();
+      reader = currentReader;
+      try {
+        for (;;) {
+          const {value, done} = await currentReader.read();
+          if (done) break;
+          acc += dec.decode(value, {stream: true});
+          let i;
+          while ((i = acc.indexOf('\n')) >= 0) {
+            try { onLine(acc.slice(0, i).replace(/\r$/, '')); }
+            catch (e) { console.warn('Ignoring invalid Pip serial message', e); }
+            acc = acc.slice(i + 1);
+          }
+        }
+      } finally {
+        if (reader === currentReader) reader = null;
+        currentReader.releaseLock();
+        currentReader = null;
       }
-      reader.releaseLock();
     }
-  } catch (e) { /* unplugged */ }
-  reader = null;
+  } catch (e) { /* Windows removed the old COM device during reset */ }
+  if (usbWanted && generation === usbGeneration && port === p) {
+    port = null;
+    cfg = null;
+    alive = 0;
+    if (usbAskTimer !== null) clearInterval(usbAskTimer), usbAskTimer = null;
+    state('USB отключился — ищу Пипа после перезагрузки...', false);
+    scheduleUsbRecovery(1000);
+  }
 }
-async function openPort(p) {
-  port = p;
-  await port.open({baudRate: 115200});
-  try { await port.setSignals({dataTerminalReady: false, requestToSend: false}); } catch (e) {}
-  readLoop();
-  state('По кабелю', true);
-  /* opening the port may reset the keychain: ask until it answers (it boots in ~4 s) */
-  cfg = null;
-  const ask = setInterval(() => { if (cfg || !port) clearInterval(ask); else send('config'); }, 1000);
+async function openPort(p, recovery = false) {
+  if (usbConnecting) return null;
+  if (!recovery) {
+    clearUsbTimers();
+    usbReopens = 0;
+    usbRecoveryStart = Date.now();
+    usbPortInfo = p.getInfo?.() || null;
+    // Nothing but the Espressif USB Serial/JTAG interface is eligible.
+    if (usbPortInfo?.usbVendorId !== 0x303a) {
+      usbFailure('Выбран не ESP32-S3 USB Serial/JTAG');
+      return null;
+    }
+  }
+  usbWanted = true;
+  usbConnecting = true;
+  const generation = ++usbGeneration;
+  state(recovery ? 'USB: переподключаю Пипа...' : 'USB: подключаю Пипа...', false);
+  try {
+    await p.open({baudRate: 115200});
+    if (!usbWanted || generation !== usbGeneration) {
+      try { await p.close(); } catch (e) {}
+      return null;
+    }
+    // IMPORTANT: ordinary Web Serial debug does not need DTR/RTS at all.
+    // Deliberately avoid setSignals({dataTerminalReady:false,requestToSend:false}).
+    // On ESP32-S3 USB Serial/JTAG a transient RTS=1 / DTR=0 resets the chip.
+    port = p;
+    cfg = null;
+    alive = 0;
+    void readLoop(p, generation);
+    const ask = async () => {
+      if (!usbWanted || port !== p || cfg) {
+        if (usbAskTimer !== null) clearInterval(usbAskTimer), usbAskTimer = null;
+        return;
+      }
+      try { await send('config'); } catch (e) { /* readLoop handles the disconnect */ }
+    };
+    usbAskTimer = setInterval(ask, 1000);
+    void ask();
+    return p;
+  } catch (e) {
+    if (usbWanted && generation === usbGeneration) {
+      state('USB: порт исчез при подключении — ожидаю повторного появления...', false);
+      scheduleUsbRecovery(1200);
+    }
+    return null;
+  } finally { usbConnecting = false; }
 }
 async function closePort() {
-  if (!port) return null;
+  // Explicit handoff to esptool/debug must never trigger an auto-reconnect.
+  usbWanted = false;
+  ++usbGeneration;
+  clearUsbTimers();
   const p = port;
   port = null;
+  cfg = null;
+  alive = 0;
+  if (!p) return null;
   try { if (reader) await reader.cancel(); } catch (e) {}
   await new Promise(r => setTimeout(r, 100));
   try { await p.close(); } catch (e) {}
@@ -514,8 +646,11 @@ async function closePort() {
 }
 function state(text, on) { $('state').textContent = text; document.body.classList.toggle('linked', on); }
 $('usb').onclick = async () => {
-  try { await openPort(await navigator.serial.requestPort({filters: [{usbVendorId: 0x303a}]})); }
-  catch (e) { if (e.name !== 'NotFoundError') state('Не вышло: ' + e.message, false); }
+  try {
+    await closePort();
+    const selected = await navigator.serial.requestPort({filters: [{usbVendorId: 0x303a}]});
+    await openPort(selected);
+  } catch (e) { if (e.name !== 'NotFoundError') usbFailure('USB: ' + e.message); }
 };
 $('ble').onclick = async () => {
   const SVC = '50495044-4247-4b45-5950-455400000001', RX = '50495044-4247-4b45-5950-455400000002', TX = '50495044-4247-4b45-5950-455400000003';
@@ -607,6 +742,7 @@ $('flash').onclick = async () => {
     for (let t = 0; !cfg && t < 60; t++) await new Promise(r => setTimeout(r, 100));
     if (cfg) { await send('update'); await new Promise(r => setTimeout(r, 600)); }
     const p = await closePort();
+    if (!p) throw new Error('USB исчез при подключении: выбери порт повторно после загрузки Пипа');
     const transport = new Transport(p, true);
     const loader = new ESPLoader({transport, baudrate: 921600, terminal: {clean() {}, writeLine() {}, write() {}}});
     $('flashState').textContent = 'Связываюсь с брелоком...';
