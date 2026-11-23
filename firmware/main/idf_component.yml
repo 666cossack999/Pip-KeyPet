@@ -1,4 +1,8 @@
 dependencies:
   idf: ">=5.5"
   waveshare/esp32_s3_touch_amoled_1_75c: "3.0.0"
-  lvgl/lvgl: "9.5.0"
+  # Use the pinned Git submodule; avoid registry LVGL conditional-Kconfig failures
+  # and keep firmware and simulator on exactly the same LVGL source tree.
+  lvgl/lvgl:
+    version: "9.5.0"
+    override_path: ../../third_party/lvgl
