@@ -476,6 +476,7 @@ function scheduleUsbRecovery(delay = 1000) {
     try {
       // getPorts() requires no new gesture: only previously authorised ports.
       const ports = await navigator.serial.getPorts();
+      if (!usbWanted || port) return; // manual close while getPorts was pending
       const p = ports.find(x => x.getInfo?.().usbVendorId === 0x303a);
       if (p) {
         usbReopens++;
@@ -522,6 +523,7 @@ function onLine(l) {
     if (port && usbWanted) {
       if (usbAskTimer !== null) clearInterval(usbAskTimer), usbAskTimer = null;
       usbReopens = 0; // the real application answered, not just Windows enumerating
+      usbRecoveryStart = Date.now();
       state('По кабелю', true);
     }
   }
@@ -552,7 +554,8 @@ async function readLoop(p, generation) {
           acc += dec.decode(value, {stream: true});
           let i;
           while ((i = acc.indexOf('\n')) >= 0) {
-            onLine(acc.slice(0, i).replace(/\r$/, ''));
+            try { onLine(acc.slice(0, i).replace(/\r$/, '')); }
+            catch (e) { console.warn('Ignoring invalid Pip serial message', e); }
             acc = acc.slice(i + 1);
           }
         }
