@@ -88,6 +88,9 @@ jobs:
       - name: Check firmware selector UI syntax
         run: node tools/test-firmware-selector.mjs
 
+      - name: Test Find my Pip web commands
+        run: node tools/test-find-my-pip.mjs
+
 
 
   catalog_check:
