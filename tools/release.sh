@@ -6,7 +6,16 @@
 #   tools/release.sh            (needs ESP-IDF 5.5: . ~/esp/esp-idf/export.sh)
 set -e
 cd "$(dirname "$0")/.."
-source ~/esp/esp-idf/export.sh >/dev/null 2>&1 || true
+# Support developer workstations and the official espressif/idf Docker image.
+if [[ -n "${IDF_PATH:-}" && -f "${IDF_PATH}/export.sh" ]]; then
+    source "${IDF_PATH}/export.sh" >/dev/null
+elif [[ -f "${HOME}/esp/esp-idf/export.sh" ]]; then
+    source "${HOME}/esp/esp-idf/export.sh" >/dev/null
+fi
+if ! command -v idf.py >/dev/null 2>&1; then
+    echo "ESP-IDF not available: install ESP-IDF 5.5 or set IDF_PATH" >&2
+    exit 1
+fi
 export KEYPET_PUBLIC=1 # nobody's private extras in it (private/)
 (cd firmware && idf.py -B build-release build >/dev/null)
 python3 - <<'EOF'
