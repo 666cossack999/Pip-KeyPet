@@ -453,18 +453,20 @@ static void sensors_task(void *arg)
 static void mic_task(void *arg)
 {
     (void)arg;
-    /* ES7210 is addressed at 0x50. Some 1.75C boards do not expose it (or it is
-       not responding at boot). Waveshare's BSP asserts when opening that codec
-       fails, rebooting Pip forever before the user can access its UI.
-       The mic is optional: continue normally with speaker/BLE/display enabled. */
-    const esp_err_t mic_probe = i2c_master_probe(bsp_i2c_get_handle(), 0x50, 50);
-    if (mic_probe != ESP_OK) {
-        ESP_LOGW(TAG, "ES7210 at I2C 0x50 unavailable (%s): microphone disabled; continuing boot",
-                 esp_err_to_name(mic_probe));
+    /* 1.75C units may strap ES7210 at 0x40 or 0x41 (I2C 7-bit).
+       The Waveshare 3.0.0 BSP uses an 8-bit 0x80 address (0x40), so it
+       cannot initialize a codec physically strapped at 0x41. The release
+       build patches the BSP to select the detected address. */
+    i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
+    bool mic_at_40 = i2c_master_probe(bus, 0x40, 50) == ESP_OK;
+    bool mic_at_41 = i2c_master_probe(bus, 0x41, 50) == ESP_OK;
+    if (!mic_at_40 && !mic_at_41) {
+        ESP_LOGW(TAG, "ES7210 not found at 0x40 or 0x41: microphone disabled; boot continues");
         mic_stop();
         vTaskDelete(NULL);
         return;
     }
+    ESP_LOGI(TAG, "ES7210 detected at I2C 0x%02x", mic_at_41 ? 0x41 : 0x40);
 
     esp_codec_dev_handle_t mic = bsp_audio_codec_microphone_init();
     esp_codec_dev_sample_info_t fs = {.sample_rate = AUDIO_RATE, .channel = 1, .bits_per_sample = 16};
